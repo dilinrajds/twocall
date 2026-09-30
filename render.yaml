@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: twocall-backend
+    runtime: docker
+    dockerfilePath: backend/Dockerfile
+    dockerContext: backend
+    plan: free
+    region: ohio
+    envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: prod
+      - key: SPRING_DATASOURCE_URL
+        value: jdbc:postgresql://ep-wild-resonance-b5h8cbqw-pooler.c-7.us-east-2.aws.neon.tech:5432/neondb?sslmode=require
+      - key: SPRING_DATASOURCE_USERNAME
+        value: neondb_owner
+      - key: SPRING_DATASOURCE_PASSWORD
+        value: npg_JluDf1pGxt8c
+      - key: JWT_SECRET
+        value: 4Z03kI3/YpA2W5Q6kFv7eJ8lM9nO0pQ1rS2tU3vW4xY5zA6bC7dE8fG9hI0jK1lM2nO3pQ4rS5tU6vW7xY8z9A==

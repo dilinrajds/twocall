@@ -30,6 +30,7 @@ ENV SERVER_PORT=8080 \
     SPRING_PROFILES_ACTIVE=prod \
     JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError"
 
-EXPOSE 8080
+EXPOSE 8080 10000
 
-ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -Dserver.port=${PORT:-8080} -jar app.jar"]
+
