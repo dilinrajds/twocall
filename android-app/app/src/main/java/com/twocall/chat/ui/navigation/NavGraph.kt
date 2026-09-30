@@ -24,13 +24,14 @@ fun NavGraph(
     ) {
         composable(Screen.Splash.route) {
             SplashLoadingScreen(
-                isPaired = pairingViewModel.isAlreadyPaired(),
+                checkPairStatus = { pairingViewModel.checkAndRefreshPairStatus() },
                 onNavigateToWelcome = {
                     navController.navigate(Screen.PairingWelcome.route) {
                         popUpTo(Screen.Splash.route) { inclusive = true }
                     }
                 },
                 onNavigateToConversation = {
+                    app.connectWebSocket()
                     navController.navigate(Screen.Conversation.route) {
                         popUpTo(Screen.Splash.route) { inclusive = true }
                     }
@@ -50,6 +51,7 @@ fun NavGraph(
                 viewModel = pairingViewModel,
                 onBackClick = { navController.popBackStack() },
                 onPairedSuccess = {
+                    app.connectWebSocket()
                     navController.navigate(Screen.PairingSuccess.route) {
                         popUpTo(Screen.PairingWelcome.route) { inclusive = true }
                     }
@@ -62,6 +64,7 @@ fun NavGraph(
                 viewModel = pairingViewModel,
                 onBackClick = { navController.popBackStack() },
                 onPairedSuccess = {
+                    app.connectWebSocket()
                     navController.navigate(Screen.PairingSuccess.route) {
                         popUpTo(Screen.PairingWelcome.route) { inclusive = true }
                     }
@@ -72,12 +75,14 @@ fun NavGraph(
         composable(Screen.PairingSuccess.route) {
             PairingSuccessScreen(
                 onOpenConversation = {
+                    app.connectWebSocket()
                     navController.navigate(Screen.Conversation.route) {
                         popUpTo(Screen.PairingWelcome.route) { inclusive = true }
                     }
                 }
             )
         }
+
 
         composable(Screen.Conversation.route) {
             ConversationScreen(

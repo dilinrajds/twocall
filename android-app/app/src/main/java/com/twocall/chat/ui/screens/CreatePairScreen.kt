@@ -39,6 +39,8 @@ fun CreatePairScreen(
     LaunchedEffect(Unit) {
         if (uiState.pairingCode == null) {
             viewModel.createPair()
+        } else {
+            viewModel.checkCurrentPairStatus()
         }
     }
 
@@ -183,7 +185,18 @@ fun CreatePairScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    TextButton(onClick = { viewModel.checkCurrentPairStatus() }) {
+                        Text(
+                            text = "Partner already entered? Tap to check",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = DarkPrimary
+                        )
+                    }
                 }
+
             } else if (uiState.error != null) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(

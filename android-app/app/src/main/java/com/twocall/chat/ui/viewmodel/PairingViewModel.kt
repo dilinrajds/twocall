@@ -37,6 +37,57 @@ class PairingViewModel(
         return keyStoreManager.isPaired()
     }
 
+    suspend fun checkAndRefreshPairStatus(): Boolean {
+        if (keyStoreManager.isPaired()) return true
+        if (keyStoreManager.hasPendingPair()) {
+            try {
+                val res = apiService.getPairInfo()
+                if (res.isSuccessful && res.body() != null) {
+                    val info = res.body()!!
+                    if (!info.partnerDeviceId.isNullOrBlank() && !info.partnerPublicKey.isNullOrBlank()) {
+                        keyStoreManager.savePartnerInfo(info.partnerDeviceId, info.partnerPublicKey)
+                        conversationDao.insertOrUpdate(
+                            ConversationEntity(
+                                pairId = info.pairId,
+                                partnerDeviceId = info.partnerDeviceId
+                            )
+                        )
+                        return true
+                    }
+                }
+            } catch (e: Exception) {
+                // Network error during refresh check
+            }
+        }
+        return false
+    }
+
+    fun checkCurrentPairStatus() {
+        viewModelScope.launch {
+            try {
+                val res = apiService.getPairInfo()
+                if (res.isSuccessful && res.body() != null) {
+                    val info = res.body()!!
+                    if (!info.partnerDeviceId.isNullOrBlank() && !info.partnerPublicKey.isNullOrBlank()) {
+                        keyStoreManager.savePartnerInfo(info.partnerDeviceId, info.partnerPublicKey)
+                        conversationDao.insertOrUpdate(
+                            ConversationEntity(
+                                pairId = info.pairId,
+                                partnerDeviceId = info.partnerDeviceId
+                            )
+                        )
+                        timerJob?.cancel()
+                        _uiState.value = _uiState.value.copy(
+                            isPairedSuccessfully = true
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                // Ignore transient errors
+            }
+        }
+    }
+
     fun createPair(deviceLabel: String = "My Phone") {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
@@ -149,8 +200,35 @@ class PairingViewModel(
                 delay(1000)
                 val remaining = _uiState.value.secondsRemaining - 1
                 _uiState.value = _uiState.value.copy(secondsRemaining = remaining)
+
+                // Poll partner status every 2 seconds
+                if (remaining % 2 == 0) {
+                    try {
+                        val res = apiService.getPairInfo()
+                        if (res.isSuccessful && res.body() != null) {
+                            val info = res.body()!!
+                            if (!info.partnerDeviceId.isNullOrBlank() && !info.partnerPublicKey.isNullOrBlank()) {
+                                keyStoreManager.savePartnerInfo(info.partnerDeviceId, info.partnerPublicKey)
+                                conversationDao.insertOrUpdate(
+                                    ConversationEntity(
+                                        pairId = info.pairId,
+                                        partnerDeviceId = info.partnerDeviceId
+                                    )
+                                )
+                                _uiState.value = _uiState.value.copy(
+                                    isPairedSuccessfully = true
+                                )
+                                return@launch
+                            }
+                        }
+                    } catch (e: Exception) {
+                        // Transient network fluctuation during poll; continue countdown
+                    }
+                }
             }
-            _uiState.value = _uiState.value.copy(error = "Pairing code expired. Please create a new pair.")
+            if (!_uiState.value.isPairedSuccessfully) {
+                _uiState.value = _uiState.value.copy(error = "Pairing code expired. Please create a new pair.")
+            }
         }
     }
 

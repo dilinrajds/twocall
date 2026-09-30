@@ -16,12 +16,13 @@ import kotlinx.coroutines.delay
 
 @Composable
 fun SplashLoadingScreen(
-    isPaired: Boolean,
+    checkPairStatus: suspend () -> Boolean,
     onNavigateToWelcome: () -> Unit,
     onNavigateToConversation: () -> Unit
 ) {
     LaunchedEffect(Unit) {
-        delay(800)
+        val isPaired = checkPairStatus()
+        delay(600)
         if (isPaired) {
             onNavigateToConversation()
         } else {

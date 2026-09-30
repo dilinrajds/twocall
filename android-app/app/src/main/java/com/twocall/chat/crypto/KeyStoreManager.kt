@@ -109,7 +109,11 @@ class KeyStoreManager(context: Context) {
     }
 
     fun isPaired(): Boolean {
-        return getPairId() != null && getAccessToken() != null
+        return getPairId() != null && getAccessToken() != null && getPartnerPublicKey() != null
+    }
+
+    fun hasPendingPair(): Boolean {
+        return getPairId() != null && getAccessToken() != null && getPartnerPublicKey() == null
     }
 
     fun getPairId(): String? = encryptedPrefs.getString(KEY_PAIR_ID, null)
