@@ -1,0 +1,30 @@
+# Environment & Secrets
+.env
+*.env
+*.pem
+*.key
+*.jks
+
+# Java & Gradle
+.gradle/
+build/
+**/build/
+!src/**/build/
+*.class
+
+# Android
+.idea/
+*.iml
+.cxx/
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+
+# Node & Tooling
+node_modules/
+D:/tools/
+uploads/media/*
+!uploads/media/.gitkeep

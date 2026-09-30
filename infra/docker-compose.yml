@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  # ----------------------------------------------------------------------------
+  # PostgreSQL Database with Health Check and Persistence
+  # ----------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: chatapp-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-chatapp_db}
+      POSTGRES_USER: ${DB_USER:-chatapp_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-chatapp_secure_dev_pass_2026}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-chatapp_user} -d ${DB_NAME:-chatapp_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ----------------------------------------------------------------------------
+  # Coturn TURN/STUN Server for WebRTC Audio/Video NAT Traversal
+  # ----------------------------------------------------------------------------
+  coturn:
+    image: coturn/coturn:latest
+    container_name: chatapp-coturn
+    restart: unless-stopped
+    network_mode: "host"
+    volumes:
+      - ./turnserver.conf:/etc/coturn/turnserver.conf:ro
+    # For production VPS, specify external IP in turnserver.conf or via cmdline
+    command:
+      - "-c"
+      - "/etc/coturn/turnserver.conf"
+
+volumes:
+  postgres_data:
+    driver: local
