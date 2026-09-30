@@ -34,6 +34,8 @@ class ChatRepository(
     val allMessagesFlow: Flow<List<MessageEntity>> = messageDao.getAllMessagesFlow()
     val conversationFlow: Flow<ConversationEntity?> = conversationDao.getConversationFlow()
 
+    var onPairTerminated: (() -> Unit)? = null
+
     init {
         // Observe WebSocket incoming events
         scope.launch {
@@ -313,11 +315,19 @@ class ChatRepository(
             "PRESENCE" -> {
                 val payloadJson = gson.toJson(event.payload)
                 val data = gson.fromJson(payloadJson, Map::class.java)
+                val eventName = data["event"] as? String
+
+                if (eventName == "PAIR_DELETED" || eventName == "PARTNER_DISCONNECTED") {
+                    Log.i(tag, "Pair terminated by partner: $eventName")
+                    onPairTerminated?.invoke()
+                    return
+                }
+
                 val online = data["online"] as? Boolean ?: false
                 conversationDao.updatePresence(pairId, online, System.currentTimeMillis())
 
                 // Handle dynamic partner key discovery if pair was completed
-                if (data["event"] == "PAIRING_COMPLETE") {
+                if (eventName == "PAIRING_COMPLETE") {
                     val partnerDevId = data["partnerDeviceId"] as? String
                     val partnerKey = data["partnerPublicKey"] as? String
                     if (partnerDevId != null && partnerKey != null) {

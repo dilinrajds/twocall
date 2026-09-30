@@ -239,4 +239,10 @@ class PairingViewModel(
     fun clearError() {
         _uiState.value = _uiState.value.copy(error = null)
     }
+
+    fun reset() {
+        timerJob?.cancel()
+        _uiState.value = PairingUiState()
+    }
 }
+

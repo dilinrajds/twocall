@@ -14,12 +14,17 @@ import com.twocall.chat.webrtc.WebRtcManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 
 class ChatApplication : Application() {
 
     private val tag = "ChatApplication"
     val applicationScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    private val _pairTerminatedFlow = MutableSharedFlow<Unit>(replay = 0, extraBufferCapacity = 1)
+    val pairTerminatedFlow = _pairTerminatedFlow.asSharedFlow()
 
     lateinit var keyStoreManager: KeyStoreManager
         private set
@@ -52,6 +57,9 @@ class ChatApplication : Application() {
             webSocketClient,
             keyStoreManager
         )
+        chatRepository.onPairTerminated = {
+            handlePartnerTerminated()
+        }
         webRtcManager = WebRtcManager(this, apiClient.apiService, webSocketClient)
         voiceRecorder = VoiceRecorder(this)
         voicePlayer = VoicePlayer()
@@ -97,11 +105,26 @@ class ChatApplication : Application() {
         }
     }
 
+    fun handlePartnerTerminated() {
+        applicationScope.launch {
+            try {
+                webSocketClient.disconnect()
+            } catch (ignored: Exception) {}
+            keyStoreManager.clearAllCredentials()
+            database.messageDao().deleteAll()
+            database.conversationDao().deleteAll()
+            _pairTerminatedFlow.tryEmit(Unit)
+            Log.i(tag, "Pair terminated handled locally: data wiped, disconnected, event emitted")
+        }
+    }
+
     suspend fun disconnectDevice() {
         try {
             apiClient.apiService.disconnect()
         } catch (ignored: Exception) {}
-        webSocketClient.disconnect()
+        try {
+            webSocketClient.disconnect()
+        } catch (ignored: Exception) {}
         keyStoreManager.clearAllCredentials()
         database.messageDao().deleteAll()
         database.conversationDao().deleteAll()
@@ -111,7 +134,9 @@ class ChatApplication : Application() {
         try {
             apiClient.apiService.deletePair()
         } catch (ignored: Exception) {}
-        webSocketClient.disconnect()
+        try {
+            webSocketClient.disconnect()
+        } catch (ignored: Exception) {}
         keyStoreManager.clearAllCredentials()
         database.messageDao().deleteAll()
         database.conversationDao().deleteAll()

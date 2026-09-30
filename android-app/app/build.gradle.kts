@@ -38,7 +38,7 @@ android {
         release {
             isMinifyEnabled = false
             signingConfig = signingConfigs.getByName("release")
-            buildConfigField("String", "BASE_URL", "\"https://chatapp-backend.koyeb.app/\"")
+            buildConfigField("String", "BASE_URL", "\"https://twocall-backend.onrender.com/\"")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -46,7 +46,7 @@ android {
         }
         debug {
             isMinifyEnabled = false
-            buildConfigField("String", "BASE_URL", "\"https://chatapp-backend.koyeb.app/\"")
+            buildConfigField("String", "BASE_URL", "\"https://twocall-backend.onrender.com/\"")
         }
     }
 

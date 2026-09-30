@@ -89,4 +89,14 @@ public class WsSessionManager {
         }
         return null;
     }
+
+    public void closeDeviceSession(UUID deviceId) {
+        WebSocketSession session = deviceSessions.remove(deviceId);
+        if (session != null && session.isOpen()) {
+            try {
+                session.close();
+            } catch (IOException ignored) {}
+        }
+    }
 }
+

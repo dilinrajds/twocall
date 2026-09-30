@@ -1,6 +1,7 @@
 package com.twocall.chat.ui.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -18,6 +19,15 @@ fun NavGraph(
     callViewModel: CallViewModel,
     app: ChatApplication
 ) {
+    LaunchedEffect(Unit) {
+        app.pairTerminatedFlow.collect {
+            pairingViewModel.reset()
+            navController.navigate(Screen.PairingWelcome.route) {
+                popUpTo(0) { inclusive = true }
+            }
+        }
+    }
+
     NavHost(
         navController = navController,
         startDestination = Screen.Splash.route
@@ -41,10 +51,17 @@ fun NavGraph(
 
         composable(Screen.PairingWelcome.route) {
             PairingWelcomeScreen(
-                onCreatePairClick = { navController.navigate(Screen.CreatePair.route) },
-                onJoinPartnerClick = { navController.navigate(Screen.EnterPairCode.route) }
+                onCreatePairClick = {
+                    pairingViewModel.reset()
+                    navController.navigate(Screen.CreatePair.route)
+                },
+                onJoinPartnerClick = {
+                    pairingViewModel.reset()
+                    navController.navigate(Screen.EnterPairCode.route)
+                }
             )
         }
+
 
         composable(Screen.CreatePair.route) {
             CreatePairScreen(
@@ -120,10 +137,12 @@ fun NavGraph(
                 app = app,
                 onBackClick = { navController.popBackStack() },
                 onDisconnected = {
+                    pairingViewModel.reset()
                     navController.navigate(Screen.PairingWelcome.route) {
-                        popUpTo(Screen.Conversation.route) { inclusive = true }
+                        popUpTo(0) { inclusive = true }
                     }
                 }
+
             )
         }
     }

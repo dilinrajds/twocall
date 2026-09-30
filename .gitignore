@@ -28,3 +28,4 @@ node_modules/
 D:/tools/
 uploads/media/*
 !uploads/media/.gitkeep
+hf-space-backend/

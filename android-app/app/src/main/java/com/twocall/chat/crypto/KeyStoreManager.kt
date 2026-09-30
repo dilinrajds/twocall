@@ -132,6 +132,6 @@ class KeyStoreManager(context: Context) {
     }
 
     fun clearAllCredentials() {
-        encryptedPrefs.edit().clear().apply()
+        encryptedPrefs.edit().clear().commit()
     }
 }

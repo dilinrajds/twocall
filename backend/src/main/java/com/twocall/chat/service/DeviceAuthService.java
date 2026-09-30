@@ -17,8 +17,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.twocall.chat.domain.enums.WsEventType;
+import com.twocall.chat.dto.ws.WsEvent;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -30,16 +33,19 @@ public class DeviceAuthService {
     private final DeviceRepository deviceRepository;
     private final PairRepository pairRepository;
     private final JwtTokenProvider tokenProvider;
+    private final WsSessionManager wsSessionManager;
 
     public DeviceAuthService(
             DeviceSessionRepository sessionRepository,
             DeviceRepository deviceRepository,
             PairRepository pairRepository,
-            JwtTokenProvider tokenProvider) {
+            JwtTokenProvider tokenProvider,
+            WsSessionManager wsSessionManager) {
         this.sessionRepository = sessionRepository;
         this.deviceRepository = deviceRepository;
         this.pairRepository = pairRepository;
         this.tokenProvider = tokenProvider;
+        this.wsSessionManager = wsSessionManager;
     }
 
     @Transactional
@@ -120,8 +126,28 @@ public class DeviceAuthService {
 
     @Transactional
     public void disconnectDevice(UUID deviceId, UUID pairId) {
-        sessionRepository.deleteAllByDeviceId(deviceId);
-        log.info("Device {} disconnected from pair {}", deviceId, pairId);
+        List<Device> devices = deviceRepository.findAllByPairId(pairId);
+        for (Device d : devices) {
+            if (!d.getId().equals(deviceId)) {
+                wsSessionManager.sendToDevice(d.getId(), new WsEvent<>(
+                        WsEventType.PRESENCE,
+                        pairId,
+                        deviceId,
+                        d.getId(),
+                        Map.of(
+                                "event", "PARTNER_DISCONNECTED",
+                                "message", "Your partner has disconnected"
+                        )
+                ));
+            }
+        }
+
+        for (Device d : devices) {
+            wsSessionManager.closeDeviceSession(d.getId());
+        }
+
+        pairRepository.deleteById(pairId);
+        log.info("Device {} disconnected. Pair {} deleted and partner notified.", deviceId, pairId);
     }
 
     @Transactional
@@ -129,7 +155,26 @@ public class DeviceAuthService {
         Pair pair = pairRepository.findById(pairId)
                 .orElseThrow(() -> new ResourceNotFoundException("Pair not found"));
 
-        // Cascade deletes devices, sessions, messages, attachments, pairing codes
+        List<Device> devices = deviceRepository.findAllByPairId(pairId);
+        for (Device d : devices) {
+            if (!d.getId().equals(callerDeviceId)) {
+                wsSessionManager.sendToDevice(d.getId(), new WsEvent<>(
+                        WsEventType.PRESENCE,
+                        pairId,
+                        callerDeviceId,
+                        d.getId(),
+                        Map.of(
+                                "event", "PAIR_DELETED",
+                                "message", "The pair has been deleted by your partner"
+                        )
+                ));
+            }
+        }
+
+        for (Device d : devices) {
+            wsSessionManager.closeDeviceSession(d.getId());
+        }
+
         pairRepository.delete(pair);
         log.info("Pair {} and all associated data permanently deleted by device {}", pairId, callerDeviceId);
     }
