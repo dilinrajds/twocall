@@ -2,6 +2,8 @@ package com.twocall.chat.ui.navigation
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -10,6 +12,7 @@ import com.twocall.chat.ui.screens.*
 import com.twocall.chat.ui.viewmodel.CallViewModel
 import com.twocall.chat.ui.viewmodel.ChatViewModel
 import com.twocall.chat.ui.viewmodel.PairingViewModel
+import com.twocall.chat.webrtc.CallState
 
 @Composable
 fun NavGraph(
@@ -19,6 +22,20 @@ fun NavGraph(
     callViewModel: CallViewModel,
     app: ChatApplication
 ) {
+    val callState by callViewModel.callState.collectAsState()
+    val currentSession by callViewModel.currentSession.collectAsState()
+
+    // Global Incoming/Outgoing Call Navigation Observer
+    LaunchedEffect(callState, currentSession) {
+        if (callState == CallState.INCOMING_RINGING || callState == CallState.OUTGOING_RINGING) {
+            val isVideo = currentSession?.isVideo == true
+            val targetRoute = if (isVideo) Screen.VideoCall.route else Screen.AudioCall.route
+            if (navController.currentDestination?.route != targetRoute) {
+                navController.navigate(targetRoute)
+            }
+        }
+    }
+
     LaunchedEffect(Unit) {
         app.pairTerminatedFlow.collect {
             pairingViewModel.reset()
@@ -62,14 +79,13 @@ fun NavGraph(
             )
         }
 
-
         composable(Screen.CreatePair.route) {
             CreatePairScreen(
                 viewModel = pairingViewModel,
                 onBackClick = { navController.popBackStack() },
                 onPairedSuccess = {
                     app.connectWebSocket()
-                    navController.navigate(Screen.PairingSuccess.route) {
+                    navController.navigate(Screen.Conversation.route) {
                         popUpTo(Screen.PairingWelcome.route) { inclusive = true }
                     }
                 }
@@ -82,7 +98,7 @@ fun NavGraph(
                 onBackClick = { navController.popBackStack() },
                 onPairedSuccess = {
                     app.connectWebSocket()
-                    navController.navigate(Screen.PairingSuccess.route) {
+                    navController.navigate(Screen.Conversation.route) {
                         popUpTo(Screen.PairingWelcome.route) { inclusive = true }
                     }
                 }
@@ -100,7 +116,6 @@ fun NavGraph(
             )
         }
 
-
         composable(Screen.Conversation.route) {
             ConversationScreen(
                 viewModel = chatViewModel,
@@ -109,6 +124,7 @@ fun NavGraph(
                     navController.navigate(Screen.AudioCall.route)
                 },
                 onVideoCallClick = {
+                    callViewModel.startVideoCall()
                     navController.navigate(Screen.VideoCall.route)
                 },
                 onSettingsClick = {
@@ -120,14 +136,22 @@ fun NavGraph(
         composable(Screen.AudioCall.route) {
             AudioCallScreen(
                 viewModel = callViewModel,
-                onCallEnded = { navController.popBackStack() }
+                onCallEnded = {
+                    if (navController.currentDestination?.route == Screen.AudioCall.route) {
+                        navController.popBackStack(Screen.Conversation.route, false)
+                    }
+                }
             )
         }
 
         composable(Screen.VideoCall.route) {
             VideoCallScreen(
                 viewModel = callViewModel,
-                onCallEnded = { navController.popBackStack() }
+                onCallEnded = {
+                    if (navController.currentDestination?.route == Screen.VideoCall.route) {
+                        navController.popBackStack(Screen.Conversation.route, false)
+                    }
+                }
             )
         }
 
@@ -142,7 +166,6 @@ fun NavGraph(
                         popUpTo(0) { inclusive = true }
                     }
                 }
-
             )
         }
     }

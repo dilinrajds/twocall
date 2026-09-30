@@ -39,7 +39,8 @@ class ApiClient(private val keyStoreManager: KeyStoreManager) {
 
         // Synchronously call refresh endpoint
         val refreshClient = OkHttpClient.Builder()
-            .connectTimeout(10, TimeUnit.SECONDS)
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
             .build()
 
         val refreshRetrofit = Retrofit.Builder()
@@ -70,6 +71,35 @@ class ApiClient(private val keyStoreManager: KeyStoreManager) {
         null
     }
 
+    suspend fun forceRefreshTokens(): Boolean {
+        val refreshToken = keyStoreManager.getRefreshToken() ?: return false
+        val refreshClient = OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .build()
+
+        val refreshRetrofit = Retrofit.Builder()
+            .baseUrl(baseUrl)
+            .client(refreshClient)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+
+        val refreshService = refreshRetrofit.create(ChatApiService::class.java)
+
+        return try {
+            val refreshResponse = refreshService.refreshToken(RefreshTokenRequestDto(refreshToken))
+            if (refreshResponse.isSuccessful && refreshResponse.body() != null) {
+                val newTokens = refreshResponse.body()!!
+                keyStoreManager.updateTokens(newTokens.accessToken, newTokens.refreshToken)
+                true
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     private fun responseCount(response: Response): Int {
         var count = 1
         var prior = response.priorResponse
@@ -84,9 +114,11 @@ class ApiClient(private val keyStoreManager: KeyStoreManager) {
         .addInterceptor(authInterceptor)
         .authenticator(tokenAuthenticator)
         .addInterceptor(HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BODY })
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
+        .pingInterval(15, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
         .build()
 
     val apiService: ChatApiService by lazy {

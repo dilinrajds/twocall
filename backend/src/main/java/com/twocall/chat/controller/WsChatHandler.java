@@ -46,7 +46,7 @@ public class WsChatHandler extends TextWebSocketHandler {
         if (deviceId != null && pairId != null) {
             sessionManager.registerSession(pairId, deviceId, session);
 
-            // Notify partner that this device came online
+            // 1. Notify partner that this device came online
             sessionManager.sendToPartner(pairId, deviceId, new WsEvent<>(
                     WsEventType.PRESENCE,
                     pairId,
@@ -54,6 +54,19 @@ public class WsChatHandler extends TextWebSocketHandler {
                     null,
                     new WsPresencePayload(true, Instant.now())
             ));
+
+            // 2. Notify connecting device of partner's current online status immediately
+            UUID partnerDeviceId = sessionManager.getPartnerDeviceId(pairId, deviceId);
+            if (partnerDeviceId != null) {
+                boolean isPartnerOnline = sessionManager.isDeviceOnline(partnerDeviceId);
+                sessionManager.sendToDevice(deviceId, new WsEvent<>(
+                        WsEventType.PRESENCE,
+                        pairId,
+                        partnerDeviceId,
+                        deviceId,
+                        new WsPresencePayload(isPartnerOnline, Instant.now())
+                ));
+            }
         }
     }
 

@@ -38,19 +38,32 @@ class WebSocketClient(
     private var reconnectJob: Job? = null
     private var shouldReconnect = true
     private var retryDelayMs = 2000L
+    private var lastRawWsUrl: String? = null
+
+    var onTokenRefreshRequired: (suspend () -> Boolean)? = null
 
     fun connect(wsUrl: String) {
         shouldReconnect = true
+
+        // Clean base URL by stripping existing query parameters
+        val cleanBaseUrl = if (wsUrl.contains("?")) wsUrl.substringBefore("?") else wsUrl
+        lastRawWsUrl = cleanBaseUrl
+
         val token = keyStoreManager.getAccessToken() ?: run {
             Log.w(tag, "Cannot connect WebSocket: No access token found")
             return
         }
 
-        val urlWithAuth = if (wsUrl.contains("?")) "$wsUrl&token=$token" else "$wsUrl?token=$token"
+        val urlWithAuth = "$cleanBaseUrl?token=$token"
         val request = Request.Builder().url(urlWithAuth).build()
 
+        // Close any stale socket before creating a new one
+        try {
+            webSocket?.close(1000, "Reconnecting")
+        } catch (ignored: Exception) {}
+
         _connectionState.value = WsConnectionState.CONNECTING
-        Log.i(tag, "Connecting WebSocket to $wsUrl...")
+        Log.i(tag, "Connecting WebSocket to $cleanBaseUrl...")
 
         webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(ws: WebSocket, response: Response) {
@@ -78,13 +91,28 @@ class WebSocketClient(
 
             override fun onClosed(ws: WebSocket, code: Int, reason: String) {
                 _connectionState.value = WsConnectionState.DISCONNECTED
-                scheduleReconnect(wsUrl)
+                scheduleReconnect(cleanBaseUrl)
             }
 
             override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
-                Log.w(tag, "WebSocket failure: ${t.message}")
+                val statusCode = response?.code ?: 0
+                Log.w(tag, "WebSocket failure (HTTP $statusCode): ${t.message}")
                 _connectionState.value = WsConnectionState.DISCONNECTED
-                scheduleReconnect(wsUrl)
+
+                if (statusCode == 401 || statusCode == 403) {
+                    Log.i(tag, "WebSocket auth failed (HTTP $statusCode). Attempting token refresh...")
+                    scope.launch {
+                        val refreshed = onTokenRefreshRequired?.invoke() ?: false
+                        if (refreshed) {
+                            Log.i(tag, "Token refreshed successfully. Reconnecting WebSocket immediately...")
+                            connect(cleanBaseUrl)
+                        } else {
+                            scheduleReconnect(cleanBaseUrl)
+                        }
+                    }
+                } else {
+                    scheduleReconnect(cleanBaseUrl)
+                }
             }
         })
     }

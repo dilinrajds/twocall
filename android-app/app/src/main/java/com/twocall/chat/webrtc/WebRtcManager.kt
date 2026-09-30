@@ -45,8 +45,12 @@ class WebRtcManager(
 
     private var localAudioTrack: AudioTrack? = null
     private var localVideoTrack: VideoTrack? = null
+    private var remoteVideoTrack: VideoTrack? = null
     private var videoCapturer: CameraVideoCapturer? = null
     private var audioManager: AudioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+
+    private var remoteRenderer: SurfaceViewRenderer? = null
+    private val queuedRemoteIceCandidates = mutableListOf<IceCandidate>()
 
     private val _callState = MutableStateFlow(CallState.IDLE)
     val callState = _callState.asStateFlow()
@@ -89,13 +93,30 @@ class WebRtcManager(
     }
 
     fun initSurfaceViews(localRenderer: SurfaceViewRenderer, remoteRenderer: SurfaceViewRenderer) {
+        this.remoteRenderer = remoteRenderer
         val eglContext = rootEglBase?.eglBaseContext ?: return
-        localRenderer.init(eglContext, null)
-        localRenderer.setEnableHardwareScaler(true)
-        localRenderer.setMirror(true)
+        try {
+            localRenderer.init(eglContext, null)
+            localRenderer.setEnableHardwareScaler(true)
+            localRenderer.setMirror(true)
+        } catch (e: Exception) {
+            Log.w(tag, "localRenderer already initialized: ${e.message}")
+        }
 
-        remoteRenderer.init(eglContext, null)
-        remoteRenderer.setEnableHardwareScaler(true)
+        try {
+            remoteRenderer.init(eglContext, null)
+            remoteRenderer.setEnableHardwareScaler(true)
+        } catch (e: Exception) {
+            Log.w(tag, "remoteRenderer already initialized: ${e.message}")
+        }
+
+        remoteVideoTrack?.let { track ->
+            try {
+                track.addSink(remoteRenderer)
+            } catch (e: Exception) {
+                Log.w(tag, "Error adding remote sink: ${e.message}")
+            }
+        }
     }
 
     private fun observeWebSocketSignaling() {
@@ -119,9 +140,13 @@ class WebRtcManager(
                 _currentSession.value = CallSessionData(callId, isVideo, false, event.senderDeviceId)
                 _callState.value = CallState.INCOMING_RINGING
 
-                // Pre-create peer connection
                 createPeerConnection(callId, isVideo)
-                peerConnection?.setRemoteDescription(SimpleSdpObserver(), SessionDescription(SessionDescription.Type.OFFER, sdp))
+                val sessionDesc = SessionDescription(SessionDescription.Type.OFFER, sdp)
+                peerConnection?.setRemoteDescription(object : SimpleSdpObserver() {
+                    override fun onSetSuccess() {
+                        drainQueuedIceCandidates()
+                    }
+                }, sessionDesc)
             }
 
             "CALL_ANSWER" -> {
@@ -129,7 +154,12 @@ class WebRtcManager(
                 val payload = gson.fromJson(payloadJson, Map::class.java)
                 val sdp = payload["sdp"] as? String ?: return
 
-                peerConnection?.setRemoteDescription(SimpleSdpObserver(), SessionDescription(SessionDescription.Type.ANSWER, sdp))
+                val sessionDesc = SessionDescription(SessionDescription.Type.ANSWER, sdp)
+                peerConnection?.setRemoteDescription(object : SimpleSdpObserver() {
+                    override fun onSetSuccess() {
+                        drainQueuedIceCandidates()
+                    }
+                }, sessionDesc)
                 _callState.value = CallState.CONNECTED
             }
 
@@ -141,7 +171,13 @@ class WebRtcManager(
                 val sdpMLineIndex = (payload["sdpMLineIndex"] as? Number)?.toInt() ?: 0
 
                 val iceCandidate = IceCandidate(sdpMid, sdpMLineIndex, candidateStr)
-                peerConnection?.addIceCandidate(iceCandidate)
+                if (peerConnection?.remoteDescription != null) {
+                    peerConnection?.addIceCandidate(iceCandidate)
+                } else {
+                    synchronized(queuedRemoteIceCandidates) {
+                        queuedRemoteIceCandidates.add(iceCandidate)
+                    }
+                }
             }
 
             "CALL_END", "CALL_REJECT" -> {
@@ -150,7 +186,19 @@ class WebRtcManager(
         }
     }
 
-    fun startOutgoingCall(isVideo: Boolean, localRenderer: SurfaceViewRenderer? = null) {
+    private fun drainQueuedIceCandidates() {
+        synchronized(queuedRemoteIceCandidates) {
+            for (candidate in queuedRemoteIceCandidates) {
+                peerConnection?.addIceCandidate(candidate)
+            }
+            queuedRemoteIceCandidates.clear()
+        }
+    }
+
+    fun startOutgoingCall(isVideo: Boolean, localRenderer: SurfaceViewRenderer? = null, remoteRenderer: SurfaceViewRenderer? = null) {
+        if (remoteRenderer != null) {
+            this.remoteRenderer = remoteRenderer
+        }
         val callId = UUID.randomUUID().toString()
         _currentSession.value = CallSessionData(callId, isVideo, true)
         _callState.value = CallState.OUTGOING_RINGING
@@ -169,7 +217,6 @@ class WebRtcManager(
                 override fun onCreateSuccess(desc: SessionDescription?) {
                     desc?.let { sdp ->
                         peerConnection?.setLocalDescription(SimpleSdpObserver(), sdp)
-                        // Send CALL_OFFER via WebSocket
                         val payload = mapOf(
                             "callId" to callId,
                             "callType" to (if (isVideo) "VIDEO" else "AUDIO"),
@@ -182,7 +229,10 @@ class WebRtcManager(
         }
     }
 
-    fun acceptIncomingCall(localRenderer: SurfaceViewRenderer? = null) {
+    fun acceptIncomingCall(localRenderer: SurfaceViewRenderer? = null, remoteRenderer: SurfaceViewRenderer? = null) {
+        if (remoteRenderer != null) {
+            this.remoteRenderer = remoteRenderer
+        }
         val session = _currentSession.value ?: return
         _callState.value = CallState.CONNECTING
 
@@ -225,31 +275,49 @@ class WebRtcManager(
     }
 
     private fun endCallLocally() {
-        peerConnection?.close()
-        peerConnection = null
-        localAudioTrack?.dispose()
-        localAudioTrack = null
-        localVideoTrack?.dispose()
-        localVideoTrack = null
-        videoCapturer?.stopCapture()
-        videoCapturer?.dispose()
-        videoCapturer = null
-
-        audioManager.isSpeakerphoneOn = false
-        audioManager.mode = AudioManager.MODE_NORMAL
-
         _callState.value = CallState.ENDED
         _currentSession.value = null
-        scope.launch {
-            delay(500)
-            _callState.value = CallState.IDLE
+
+        scope.launch(Dispatchers.IO) {
+            synchronized(queuedRemoteIceCandidates) {
+                queuedRemoteIceCandidates.clear()
+            }
+            try {
+                peerConnection?.close()
+            } catch (ignored: Exception) {}
+            peerConnection = null
+
+            try {
+                localAudioTrack?.dispose()
+            } catch (ignored: Exception) {}
+            localAudioTrack = null
+
+            try {
+                localVideoTrack?.dispose()
+            } catch (ignored: Exception) {}
+            localVideoTrack = null
+            remoteVideoTrack = null
+
+            try {
+                videoCapturer?.stopCapture()
+                videoCapturer?.dispose()
+            } catch (ignored: Exception) {}
+            videoCapturer = null
+
+            withContext(Dispatchers.Main) {
+                audioManager.isSpeakerphoneOn = false
+                audioManager.mode = AudioManager.MODE_NORMAL
+                _callState.value = CallState.IDLE
+            }
         }
     }
 
     private suspend fun createPeerConnection(callId: String, isVideo: Boolean, localRenderer: SurfaceViewRenderer? = null) {
-        // Fetch TURN / STUN credentials from backend
         val iceServers = mutableListOf(
-            PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer()
+            PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
+            PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
+            PeerConnection.IceServer.builder("stun:stun2.l.google.com:19302").createIceServer(),
+            PeerConnection.IceServer.builder("stun:stun.services.mozilla.com").createIceServer()
         )
 
         try {
@@ -302,10 +370,19 @@ class WebRtcManager(
             override fun onRenegotiationNeeded() {}
 
             override fun onTrack(transceiver: RtpTransceiver?) {
-                // Remote track added
                 val track = transceiver?.receiver?.track()
                 if (track is VideoTrack) {
-                    Log.i(tag, "Remote VideoTrack received")
+                    Log.i(tag, "Remote VideoTrack received!")
+                    remoteVideoTrack = track
+                    scope.launch(Dispatchers.Main) {
+                        remoteRenderer?.let { renderer ->
+                            try {
+                                track.addSink(renderer)
+                            } catch (e: Exception) {
+                                Log.w(tag, "Failed to attach remote track sink: ${e.message}")
+                            }
+                        }
+                    }
                 }
             }
         })
@@ -320,35 +397,41 @@ class WebRtcManager(
 
         if (isVideo) {
             videoCapturer = createCameraCapturer()
-            val surfaceTextureHelper = SurfaceTextureHelper.create("CaptureThread", rootEglBase?.eglBaseContext)
-            val videoSource = peerConnectionFactory?.createVideoSource(videoCapturer!!.isScreencast)
-            videoCapturer?.initialize(surfaceTextureHelper, context, videoSource?.capturerObserver)
-            videoCapturer?.startCapture(1280, 720, 30)
+            if (videoCapturer != null) {
+                val surfaceTextureHelper = SurfaceTextureHelper.create("CaptureThread", rootEglBase?.eglBaseContext)
+                val videoSource = peerConnectionFactory?.createVideoSource(videoCapturer!!.isScreencast)
+                videoCapturer?.initialize(surfaceTextureHelper, context, videoSource?.capturerObserver)
+                videoCapturer?.startCapture(1280, 720, 30)
 
-            localVideoTrack = peerConnectionFactory?.createVideoTrack("local_video_track", videoSource)
-            localRenderer?.let { localVideoTrack?.addSink(it) }
-            localVideoTrack?.let { peerConnection?.addTrack(it, listOf("media_stream")) }
+                localVideoTrack = peerConnectionFactory?.createVideoTrack("local_video_track", videoSource)
+                localRenderer?.let { localVideoTrack?.addSink(it) }
+                localVideoTrack?.let { peerConnection?.addTrack(it, listOf("media_stream")) }
+            }
         }
 
-        // Configure audio routing
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-        audioManager.isSpeakerphoneOn = isVideo // Default speaker on for video, earpiece for audio
+        audioManager.isSpeakerphoneOn = isVideo
         _isSpeakerOn.value = isVideo
     }
 
     private fun createCameraCapturer(): CameraVideoCapturer? {
-        val enumerator = Camera2Enumerator(context)
-        for (deviceName in enumerator.deviceNames) {
-            if (enumerator.isFrontFacing(deviceName)) {
-                return enumerator.createCapturer(deviceName, null)
+        return try {
+            val enumerator = Camera2Enumerator(context)
+            for (deviceName in enumerator.deviceNames) {
+                if (enumerator.isFrontFacing(deviceName)) {
+                    return enumerator.createCapturer(deviceName, null)
+                }
             }
-        }
-        for (deviceName in enumerator.deviceNames) {
-            if (!enumerator.isFrontFacing(deviceName)) {
-                return enumerator.createCapturer(deviceName, null)
+            for (deviceName in enumerator.deviceNames) {
+                if (!enumerator.isFrontFacing(deviceName)) {
+                    return enumerator.createCapturer(deviceName, null)
+                }
             }
+            null
+        } catch (e: Exception) {
+            Log.e(tag, "Error creating camera capturer: ${e.message}")
+            null
         }
-        return null
     }
 
     fun toggleMic(): Boolean {
@@ -360,6 +443,7 @@ class WebRtcManager(
 
     fun toggleSpeaker(): Boolean {
         val speaker = !_isSpeakerOn.value
+        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
         audioManager.isSpeakerphoneOn = speaker
         _isSpeakerOn.value = speaker
         return speaker

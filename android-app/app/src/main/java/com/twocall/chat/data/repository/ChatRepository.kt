@@ -1,5 +1,6 @@
 package com.twocall.chat.data.repository
 
+import android.content.Context
 import android.util.Log
 import com.google.gson.Gson
 import com.twocall.chat.crypto.CryptoEngine
@@ -13,13 +14,16 @@ import com.twocall.chat.data.remote.dto.*
 import com.twocall.chat.data.remote.ws.WebSocketClient
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.asSharedFlow
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
+import java.io.FileOutputStream
 import java.util.UUID
 
 class ChatRepository(
+    private val context: Context,
     private val messageDao: MessageDao,
     private val conversationDao: ConversationDao,
     private val apiService: ChatApiService,
@@ -35,6 +39,9 @@ class ChatRepository(
     val conversationFlow: Flow<ConversationEntity?> = conversationDao.getConversationFlow()
 
     var onPairTerminated: (() -> Unit)? = null
+
+    private val _loveAnimationEvents = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 16)
+    val loveAnimationEvents = _loveAnimationEvents.asSharedFlow()
 
     init {
         // Observe WebSocket incoming events
@@ -90,6 +97,7 @@ class ChatRepository(
             val response = apiService.sendMessage(req)
             if (response.isSuccessful && response.body() != null) {
                 val serverMsg = response.body()!!
+                messageDao.deleteById(tempId)
                 messageDao.insertOrUpdate(
                     localMessage.copy(
                         id = serverMsg.id,
@@ -157,7 +165,31 @@ class ChatRepository(
         val sendRes = apiService.sendMessage(req)
         if (sendRes.isSuccessful && sendRes.body() != null) {
             val serverMsg = sendRes.body()!!
+            messageDao.deleteById(tempId)
             messageDao.insertOrUpdate(localMessage.copy(id = serverMsg.id, status = serverMsg.status))
+        }
+    }
+
+    private fun downloadAttachmentIfNeeded(messageId: String, attachmentRemoteId: String) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                val response = apiService.downloadMedia(attachmentRemoteId)
+                if (response.isSuccessful && response.body() != null) {
+                    val mediaDir = File(context.cacheDir, "attachments").apply { mkdirs() }
+                    val localFile = File(mediaDir, "att_$attachmentRemoteId")
+                    response.body()!!.byteStream().use { input ->
+                        FileOutputStream(localFile).use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    messageDao.updateAttachmentLocalPath(messageId, localFile.absolutePath)
+                    Log.i(tag, "Downloaded attachment $attachmentRemoteId for message $messageId -> ${localFile.absolutePath}")
+                } else {
+                    Log.w(tag, "Failed to download media attachment $attachmentRemoteId: code ${response.code()}")
+                }
+            } catch (e: Exception) {
+                Log.w(tag, "Error downloading media attachment $attachmentRemoteId: ${e.message}")
+            }
         }
     }
 
@@ -172,6 +204,8 @@ class ChatRepository(
                 val list = res.body()!!
                 for (dto in list) {
                     val isOutgoing = dto.senderDeviceId == myDeviceId
+                    val existingMsg = messageDao.getMessageById(dto.id)
+
                     val decryptedText = if (dto.isDeleted) {
                         ""
                     } else {
@@ -193,12 +227,18 @@ class ChatRepository(
                         messageType = dto.messageType,
                         replyToMessageId = dto.replyToMessageId,
                         attachmentRemoteId = dto.mediaAttachmentId,
+                        attachmentLocalPath = existingMsg?.attachmentLocalPath,
                         status = dto.status,
                         isOutgoing = isOutgoing,
                         timestamp = parseIsoTimestamp(dto.createdAt),
                         isDeleted = dto.isDeleted
                     )
                     messageDao.insertOrUpdate(entity)
+
+                    // Auto-download attachment if received media message and not saved locally yet
+                    if (!dto.mediaAttachmentId.isNullOrBlank() && existingMsg?.attachmentLocalPath == null) {
+                        downloadAttachmentIfNeeded(dto.id, dto.mediaAttachmentId)
+                    }
 
                     // If incoming and status is DELIVERED, send READ receipt
                     if (!isOutgoing && dto.status != "READ") {
@@ -230,11 +270,22 @@ class ChatRepository(
     }
 
     suspend fun deleteMessage(messageId: String) {
+        // Mark deleted locally immediately for smooth UI feedback
+        messageDao.markDeleted(messageId)
+
+        // Resolve target server ID if messageId is local tempId or clientMessageId
+        val msg = messageDao.getMessageById(messageId)
+        val targetServerId = msg?.id ?: messageId
+
         try {
-            apiService.deleteMessage(messageId)
-            messageDao.markDeleted(messageId)
+            val response = apiService.deleteMessage(targetServerId)
+            if (response.isSuccessful) {
+                Log.i(tag, "Successfully deleted message $targetServerId on server")
+            } else {
+                Log.w(tag, "Delete message server responded with code ${response.code()}")
+            }
         } catch (e: Exception) {
-            Log.w(tag, "Delete message failed: ${e.message}")
+            Log.w(tag, "Delete message API call failed: ${e.message}")
         }
     }
 
@@ -245,6 +296,11 @@ class ChatRepository(
     private suspend fun handleIncomingWsEvent(event: WsEventDto<Any>) {
         val pairId = keyStoreManager.getPairId() ?: return
         val aesKey = keyStoreManager.getSharedSessionAesKey()
+
+        // Any event from partner implies partner is currently online
+        if (event.eventType != "PRESENCE") {
+            conversationDao.updatePresence(pairId, true, System.currentTimeMillis())
+        }
 
         when (event.eventType) {
             "MESSAGE_SENT" -> {
@@ -276,6 +332,16 @@ class ChatRepository(
                 )
                 messageDao.insertOrUpdate(entity)
 
+                // Auto download media attachment if received
+                if (!msgDto.mediaAttachmentId.isNullOrBlank()) {
+                    downloadAttachmentIfNeeded(msgDto.id, msgDto.mediaAttachmentId)
+                }
+
+                // Check for love emoji in incoming message
+                if (com.twocall.chat.ui.components.containsLoveEmoji(decrypted)) {
+                    _loveAnimationEvents.tryEmit(Unit)
+                }
+
                 // Send DELIVERED receipt
                 sendReceipt(msgDto.id, "DELIVERED")
             }
@@ -300,6 +366,9 @@ class ChatRepository(
                 val msgId = data["messageId"] as? String ?: return
                 val emoji = data["emoji"] as? String
                 messageDao.updateReaction(msgId, emoji)
+                if (emoji != null && com.twocall.chat.ui.components.containsLoveEmoji(emoji)) {
+                    _loveAnimationEvents.tryEmit(Unit)
+                }
             }
 
             "MESSAGE_DELETED" -> {
@@ -326,7 +395,6 @@ class ChatRepository(
                 val online = data["online"] as? Boolean ?: false
                 conversationDao.updatePresence(pairId, online, System.currentTimeMillis())
 
-                // Handle dynamic partner key discovery if pair was completed
                 if (eventName == "PAIRING_COMPLETE") {
                     val partnerDevId = data["partnerDeviceId"] as? String
                     val partnerKey = data["partnerPublicKey"] as? String

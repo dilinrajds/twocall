@@ -125,6 +125,9 @@ dependencies {
     // Firebase Cloud Messaging
     implementation("com.google.firebase:firebase-messaging:24.0.1")
 
+    // WorkManager for Background Keep-Alive
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
+
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 

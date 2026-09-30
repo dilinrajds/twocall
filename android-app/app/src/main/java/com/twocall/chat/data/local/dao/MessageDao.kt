@@ -19,19 +19,25 @@ interface MessageDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(messages: List<MessageEntity>)
 
+    @Query("DELETE FROM messages WHERE id = :messageId")
+    suspend fun deleteById(messageId: String)
+
     @Query("UPDATE messages SET status = :status WHERE id = :messageId")
     suspend fun updateStatus(messageId: String, status: String)
+
+    @Query("UPDATE messages SET attachmentLocalPath = :path WHERE id = :messageId")
+    suspend fun updateAttachmentLocalPath(messageId: String, path: String)
 
     @Query("UPDATE messages SET reactionEmoji = :emoji WHERE id = :messageId")
     suspend fun updateReaction(messageId: String, emoji: String?)
 
-    @Query("UPDATE messages SET isDeleted = 1, plaintext = '' WHERE id = :messageId")
+    @Query("UPDATE messages SET isDeleted = 1, plaintext = '' WHERE id = :messageId OR clientMessageId = :messageId")
     suspend fun markDeleted(messageId: String)
 
     @Query("SELECT * FROM messages WHERE status = 'PENDING' AND isOutgoing = 1 ORDER BY timestamp ASC")
     suspend fun getPendingOutgoingMessages(): List<MessageEntity>
 
-    @Query("SELECT * FROM messages WHERE id = :messageId LIMIT 1")
+    @Query("SELECT * FROM messages WHERE id = :messageId OR clientMessageId = :messageId LIMIT 1")
     suspend fun getMessageById(messageId: String): MessageEntity?
 
     @Query("SELECT MAX(timestamp) FROM messages")

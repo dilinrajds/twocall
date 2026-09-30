@@ -49,8 +49,11 @@ class ChatApplication : Application() {
         keyStoreManager = KeyStoreManager(this)
         database = AppDatabase.getInstance(this)
         apiClient = ApiClient(keyStoreManager)
-        webSocketClient = WebSocketClient(apiClient.okHttpClient, keyStoreManager)
+        webSocketClient = WebSocketClient(apiClient.okHttpClient, keyStoreManager).apply {
+            onTokenRefreshRequired = { apiClient.forceRefreshTokens() }
+        }
         chatRepository = ChatRepository(
+            this,
             database.messageDao(),
             database.conversationDao(),
             apiClient.apiService,
@@ -63,6 +66,9 @@ class ChatApplication : Application() {
         webRtcManager = WebRtcManager(this, apiClient.apiService, webSocketClient)
         voiceRecorder = VoiceRecorder(this)
         voicePlayer = VoicePlayer()
+
+        // Schedule 12-minute periodic keep-alive worker to keep Render backend active 24/7
+        com.twocall.chat.worker.RenderKeepAliveWorker.schedulePeriodicKeepAlive(this)
 
         // Auto-connect WebSocket if paired
         if (keyStoreManager.isPaired()) {

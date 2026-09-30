@@ -39,25 +39,23 @@ class PairingViewModel(
 
     suspend fun checkAndRefreshPairStatus(): Boolean {
         if (keyStoreManager.isPaired()) return true
-        if (keyStoreManager.hasPendingPair()) {
-            try {
-                val res = apiService.getPairInfo()
-                if (res.isSuccessful && res.body() != null) {
-                    val info = res.body()!!
-                    if (!info.partnerDeviceId.isNullOrBlank() && !info.partnerPublicKey.isNullOrBlank()) {
-                        keyStoreManager.savePartnerInfo(info.partnerDeviceId, info.partnerPublicKey)
-                        conversationDao.insertOrUpdate(
-                            ConversationEntity(
-                                pairId = info.pairId,
-                                partnerDeviceId = info.partnerDeviceId
-                            )
+        try {
+            val res = apiService.getPairInfo()
+            if (res.isSuccessful && res.body() != null) {
+                val info = res.body()!!
+                if (!info.partnerDeviceId.isNullOrBlank() && !info.partnerPublicKey.isNullOrBlank()) {
+                    keyStoreManager.savePartnerInfo(info.partnerDeviceId, info.partnerPublicKey)
+                    conversationDao.insertOrUpdate(
+                        ConversationEntity(
+                            pairId = info.pairId,
+                            partnerDeviceId = info.partnerDeviceId
                         )
-                        return true
-                    }
+                    )
+                    return true
                 }
-            } catch (e: Exception) {
-                // Network error during refresh check
             }
+        } catch (e: Exception) {
+            // Server warm-up ping completed / ignore transient errors
         }
         return false
     }
@@ -91,44 +89,66 @@ class PairingViewModel(
     fun createPair(deviceLabel: String = "My Phone") {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
-            try {
-                val fingerprint = keyStoreManager.getOrCreateDeviceFingerprint()
-                val publicKey = keyStoreManager.getMyPublicKeyBase64()
 
-                val res = apiService.createPair(
-                    CreatePairRequestDto(
-                        deviceFingerprint = fingerprint,
-                        publicIdentityKey = publicKey,
-                        deviceLabel = deviceLabel
-                    )
-                )
+            val fingerprint = keyStoreManager.getOrCreateDeviceFingerprint()
+            val publicKey = keyStoreManager.getMyPublicKeyBase64()
 
-                if (res.isSuccessful && res.body() != null) {
-                    val body = res.body()!!
-                    keyStoreManager.savePairingSession(
-                        pairId = body.pairId,
-                        deviceId = body.deviceId,
-                        accessToken = body.accessToken,
-                        refreshToken = body.refreshToken
+            var attempts = 0
+            var success = false
+
+            while (attempts < 3 && !success) {
+                attempts++
+                try {
+                    val res = apiService.createPair(
+                        CreatePairRequestDto(
+                            deviceFingerprint = fingerprint,
+                            publicIdentityKey = publicKey,
+                            deviceLabel = deviceLabel
+                        )
                     )
 
-                    conversationDao.insertOrUpdate(
-                        ConversationEntity(pairId = body.pairId)
-                    )
+                    if (res.isSuccessful && res.body() != null) {
+                        val body = res.body()!!
+                        keyStoreManager.savePairingSession(
+                            pairId = body.pairId,
+                            deviceId = body.deviceId,
+                            accessToken = body.accessToken,
+                            refreshToken = body.refreshToken
+                        )
 
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        pairingCode = body.pairingCode,
-                        secondsRemaining = 300,
-                        error = null
-                    )
-                    startCountdownTimer()
-                } else {
-                    val errMsg = res.errorBody()?.string() ?: "Failed to generate pairing code"
-                    _uiState.value = _uiState.value.copy(isLoading = false, error = errMsg)
+                        conversationDao.insertOrUpdate(
+                            ConversationEntity(pairId = body.pairId)
+                        )
+
+                        _uiState.value = _uiState.value.copy(
+                            isLoading = false,
+                            pairingCode = body.pairingCode,
+                            secondsRemaining = 300,
+                            error = null
+                        )
+                        startCountdownTimer()
+                        success = true
+                    } else {
+                        val errMsg = res.errorBody()?.string() ?: "Failed to generate pairing code"
+                        _uiState.value = _uiState.value.copy(isLoading = false, error = errMsg)
+                        break
+                    }
+                } catch (e: Exception) {
+                    if (attempts < 3) {
+                        _uiState.value = _uiState.value.copy(
+                            isLoading = true,
+                            error = "Waking up secure server... Attempt $attempts/3"
+                        )
+                        delay(2500)
+                    } else {
+                        val friendlyError = if (e is java.net.SocketTimeoutException || e.message?.contains("timeout", ignoreCase = true) == true) {
+                            "Server connection timed out during cold start. Please tap 'Try Again'."
+                        } else {
+                            e.localizedMessage ?: "Network connection error"
+                        }
+                        _uiState.value = _uiState.value.copy(isLoading = false, error = friendlyError)
+                    }
                 }
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(isLoading = false, error = e.localizedMessage ?: "Network error")
             }
         }
     }
@@ -141,54 +161,76 @@ class PairingViewModel(
 
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
-            try {
-                val fingerprint = keyStoreManager.getOrCreateDeviceFingerprint()
-                val publicKey = keyStoreManager.getMyPublicKeyBase64()
 
-                val res = apiService.joinPair(
-                    JoinPairRequestDto(
-                        code = code.trim(),
-                        deviceFingerprint = fingerprint,
-                        publicIdentityKey = publicKey,
-                        deviceLabel = deviceLabel
-                    )
-                )
+            val fingerprint = keyStoreManager.getOrCreateDeviceFingerprint()
+            val publicKey = keyStoreManager.getMyPublicKeyBase64()
 
-                if (res.isSuccessful && res.body() != null) {
-                    val body = res.body()!!
-                    keyStoreManager.savePairingSession(
-                        pairId = body.pairId,
-                        deviceId = body.deviceId,
-                        accessToken = body.accessToken,
-                        refreshToken = body.refreshToken,
-                        partnerDeviceId = body.partnerDeviceId,
-                        partnerPublicKey = body.partnerPublicKey
-                    )
+            var attempts = 0
+            var success = false
 
-                    conversationDao.insertOrUpdate(
-                        ConversationEntity(
-                            pairId = body.pairId,
-                            partnerDeviceId = body.partnerDeviceId
+            while (attempts < 3 && !success) {
+                attempts++
+                try {
+                    val res = apiService.joinPair(
+                        JoinPairRequestDto(
+                            code = code.trim(),
+                            deviceFingerprint = fingerprint,
+                            publicIdentityKey = publicKey,
+                            deviceLabel = deviceLabel
                         )
                     )
 
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        isPairedSuccessfully = true,
-                        error = null
-                    )
-                } else {
-                    val errMsg = if (res.code() == 410) {
-                        "Pairing code has expired. Request a new code from partner."
-                    } else if (res.code() == 403) {
-                        "Pair limit reached. A third device cannot join."
+                    if (res.isSuccessful && res.body() != null) {
+                        val body = res.body()!!
+                        keyStoreManager.savePairingSession(
+                            pairId = body.pairId,
+                            deviceId = body.deviceId,
+                            accessToken = body.accessToken,
+                            refreshToken = body.refreshToken,
+                            partnerDeviceId = body.partnerDeviceId,
+                            partnerPublicKey = body.partnerPublicKey
+                        )
+
+                        conversationDao.insertOrUpdate(
+                            ConversationEntity(
+                                pairId = body.pairId,
+                                partnerDeviceId = body.partnerDeviceId
+                            )
+                        )
+
+                        _uiState.value = _uiState.value.copy(
+                            isLoading = false,
+                            isPairedSuccessfully = true,
+                            error = null
+                        )
+                        success = true
                     } else {
-                        "Invalid pairing code or maximum attempts exceeded."
+                        val errMsg = if (res.code() == 410) {
+                            "Pairing code has expired. Request a new code from partner."
+                        } else if (res.code() == 403) {
+                            "Pair limit reached. A third device cannot join."
+                        } else {
+                            "Invalid pairing code or maximum attempts exceeded."
+                        }
+                        _uiState.value = _uiState.value.copy(isLoading = false, error = errMsg)
+                        break
                     }
-                    _uiState.value = _uiState.value.copy(isLoading = false, error = errMsg)
+                } catch (e: Exception) {
+                    if (attempts < 3) {
+                        _uiState.value = _uiState.value.copy(
+                            isLoading = true,
+                            error = "Waking up secure server... Attempt $attempts/3"
+                        )
+                        delay(2500)
+                    } else {
+                        val friendlyError = if (e is java.net.SocketTimeoutException || e.message?.contains("timeout", ignoreCase = true) == true) {
+                            "Server connection timed out during cold start. Please tap 'Connect Private Pair' again."
+                        } else {
+                            e.localizedMessage ?: "Network connection error"
+                        }
+                        _uiState.value = _uiState.value.copy(isLoading = false, error = friendlyError)
+                    }
                 }
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(isLoading = false, error = e.localizedMessage ?: "Network error")
             }
         }
     }
@@ -245,4 +287,3 @@ class PairingViewModel(
         _uiState.value = PairingUiState()
     }
 }
-

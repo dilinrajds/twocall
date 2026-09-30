@@ -42,12 +42,12 @@ class CallViewModel(
         webRtcManager.startOutgoingCall(isVideo = false)
     }
 
-    fun startVideoCall(localRenderer: SurfaceViewRenderer) {
-        webRtcManager.startOutgoingCall(isVideo = true, localRenderer = localRenderer)
+    fun startVideoCall(localRenderer: SurfaceViewRenderer? = null, remoteRenderer: SurfaceViewRenderer? = null) {
+        webRtcManager.startOutgoingCall(isVideo = true, localRenderer = localRenderer, remoteRenderer = remoteRenderer)
     }
 
-    fun acceptCall(localRenderer: SurfaceViewRenderer? = null) {
-        webRtcManager.acceptIncomingCall(localRenderer)
+    fun acceptCall(localRenderer: SurfaceViewRenderer? = null, remoteRenderer: SurfaceViewRenderer? = null) {
+        webRtcManager.acceptIncomingCall(localRenderer, remoteRenderer)
     }
 
     fun rejectCall() {

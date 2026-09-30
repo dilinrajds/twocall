@@ -37,6 +37,8 @@ class ChatViewModel(
         null
     )
 
+    val loveAnimationEvents = repository.loveAnimationEvents
+
     private val _replyingTo = MutableStateFlow<MessageEntity?>(null)
     val replyingTo = _replyingTo.asStateFlow()
 
