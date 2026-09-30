@@ -6,16 +6,26 @@
 
 **TwoCall** is a private, minimalist Android messaging and voice/video calling application built exclusively for communication between **TWO paired users** (e.g., partners/couples).
 
-### Core Highlights:
-- 🚫 **Zero Account Registration**: No phone numbers, SMS, OTPs, emails, passwords, usernames, or public discovery.
-- 🔑 **Cryptographic 6-Digit Pairing**: Secure, ephemeral, single-use 6-digit code with server-side rate-limiting and 5-minute auto-expiry.
-- 🛡️ **Hardware-Backed Device Identity**: Generates EC key pairs in `AndroidKeyStore`; stores device tokens in `EncryptedSharedPreferences`.
-- 🔒 **Zero-Knowledge Backend / E2EE**: All message contents, voice notes, and media metadata are end-to-end encrypted on device using **NIST P-256 ECDH** and **AES-256-GCM**. The backend only stores ciphertext and IVs.
-- 👥 **Strict Two-Device Enforcement**: Exactly two devices per pair. A third device is rejected at both database and service layers.
-- 💬 **Rich Realtime Chat**: Offline queue, automatic delivery & read receipts, live typing indicators, online presence, message replies, emoji reactions, and message deletion.
-- 🎤 **Voice Messaging**: Hold/press to record AAC audio with live waveform amplitude, audio preview, and playback bar.
-- 📞 **Native WebRTC Audio & Video Calling**: One-to-one P2P calling with camera switcher, video toggle, mic mute, speaker control, SurfaceViewRenderer video streaming, and Coturn STUN/TURN integration.
-- 🔔 **Privacy-Preserving FCM Push**: Wakeup notifications with metadata only—no plaintext is ever leaked in push payloads.
+- 🌐 **Live Cloud Backend**: Fully deployed and running on Render with automatic HTTPS and WSS at `https://twocall-backend.onrender.com`.
+- 🗄️ **Serverless PostgreSQL**: Hosted on Neon Cloud with automated Flyway migrations and connection pooling.
+- 📦 **Zero-Configuration Install**: Production APK is hardwired to the live cloud backend. Install APK on two devices -> tap Pair -> done!
+- 📲 **Ready-to-Install APK**: [TwoCall-release.apk](file:///d:/ChatApp/TwoCall-release.apk) (53.6 MB, signed with production keystore).
+
+---
+
+## 🚀 Quick Install & Zero-Configuration Usage
+
+### Step 1: Install APK on Both Phones
+Copy [TwoCall-release.apk](file:///d:/ChatApp/TwoCall-release.apk) to both **Phone A** and **Phone B** and install it.
+
+### Step 2: Pair Devices Over the Internet
+1. **Phone A**: Open TwoCall -> Tap **"Create Pair"** -> You will receive an ephemeral 6-digit pairing code (e.g. `810345`).
+2. **Phone B**: Open TwoCall -> Tap **"Join Partner"** -> Enter the 6-digit code.
+3. Both devices instantly complete the cryptographic handshake, exchange public keys, derive the shared AES-256-GCM session key, and navigate to the chat interface.
+
+### Step 3: Chat & Call Immediately
+- **End-to-End Encrypted Chat**: Send text, emoji reactions, voice notes, and file attachments.
+- **Audio & Video Calling**: Tap the phone or video icon in the chat header to initiate a native WebRTC call with camera toggle, mic mute, speaker switching, and picture-in-picture stream rendering.
 
 ---
 
