@@ -9,11 +9,12 @@ WORKDIR /workspace
 # Cache gradle dependencies
 COPY gradlew settings.gradle build.gradle ./
 COPY gradle ./gradle
+ENV GRADLE_OPTS="-Xmx512m -Xms256m -XX:+UseSerialGC -Dorg.gradle.daemon=false"
 RUN chmod +x ./gradlew && ./gradlew dependencies --no-daemon || true
 
 # Copy source code and build production jar
 COPY src ./src
-RUN ./gradlew bootJar --no-daemon -x test
+RUN ./gradlew bootJar --no-daemon -x test --info
 
 # Runtime stage
 FROM eclipse-temurin:21-jre-alpine
@@ -30,7 +31,7 @@ ENV SERVER_PORT=8080 \
     SPRING_PROFILES_ACTIVE=prod \
     JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError"
 
-EXPOSE 8080 10000
+EXPOSE 8080
 
 ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -Dserver.port=${PORT:-8080} -jar app.jar"]
 
