@@ -38,8 +38,14 @@ class PairingViewModel(
     }
 
     suspend fun checkAndRefreshPairStatus(): Boolean {
+        // Fast path: already fully paired locally — no network needed
         if (keyStoreManager.isPaired()) return true
-        try {
+
+        // Slow path: we have a pairing session but partner key not yet received
+        // (happens when the code creator is waiting for partner to join)
+        if (!keyStoreManager.hasPendingPair()) return false
+
+        return try {
             val res = apiService.getPairInfo()
             if (res.isSuccessful && res.body() != null) {
                 val info = res.body()!!
@@ -54,10 +60,11 @@ class PairingViewModel(
                     return true
                 }
             }
+            false
         } catch (e: Exception) {
             // Server warm-up ping completed / ignore transient errors
+            false
         }
-        return false
     }
 
     fun checkCurrentPairStatus() {
@@ -86,7 +93,10 @@ class PairingViewModel(
         }
     }
 
-    fun createPair(deviceLabel: String = "My Phone") {
+    fun createPair() {
+        // Use saved profile name, fallback to device model name
+        val deviceLabel = keyStoreManager.getMyProfileName().takeIf { it.isNotBlank() }
+            ?: android.os.Build.MODEL.take(50).ifBlank { "My Phone" }
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
 
@@ -115,6 +125,10 @@ class PairingViewModel(
                             accessToken = body.accessToken,
                             refreshToken = body.refreshToken
                         )
+                        // Save profile name locally so it shows correctly in Settings
+                        if (keyStoreManager.getMyProfileName().isBlank()) {
+                            keyStoreManager.saveMyProfile(deviceLabel, null)
+                        }
 
                         conversationDao.insertOrUpdate(
                             ConversationEntity(pairId = body.pairId)
@@ -153,10 +167,13 @@ class PairingViewModel(
         }
     }
 
-    fun joinPair(code: String, deviceLabel: String = "Partner Phone") {
+    fun joinPair(code: String) {
         if (_uiState.value.isLoading || _uiState.value.isPairedSuccessfully) {
             return
         }
+        // Use saved profile name, fallback to device model name
+        val deviceLabel = keyStoreManager.getMyProfileName().takeIf { it.isNotBlank() }
+            ?: android.os.Build.MODEL.take(50).ifBlank { "Partner Phone" }
         if (!code.matches(Regex("^[0-9]{6}$"))) {
             _uiState.value = _uiState.value.copy(error = "Please enter a valid 6-digit code")
             return
@@ -193,6 +210,10 @@ class PairingViewModel(
                             partnerDeviceId = body.partnerDeviceId,
                             partnerPublicKey = body.partnerPublicKey
                         )
+                        // Save profile name locally so it shows correctly in Settings
+                        if (keyStoreManager.getMyProfileName().isBlank()) {
+                            keyStoreManager.saveMyProfile(deviceLabel, null)
+                        }
 
                         conversationDao.insertOrUpdate(
                             ConversationEntity(

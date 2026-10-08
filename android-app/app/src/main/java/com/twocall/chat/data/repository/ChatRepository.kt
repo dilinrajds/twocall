@@ -85,11 +85,29 @@ class ChatRepository(
         if (!response.isSuccessful) return
         val profiles = response.body() ?: return
         val localName = keyStoreManager.getMyProfileName()
-        if (localName.isNotBlank() && (profiles.mine.name != localName ||
-                profiles.mine.imageBase64.orEmpty() != keyStoreManager.getMyProfileImage().orEmpty())) {
-            apiService.updateProfile(ProfileDto(localName, keyStoreManager.getMyProfileImage()), pairId)
+
+        // Ensure conversation row exists before trying to update profile columns
+        val existing = conversationDao.getConversationByPairId(pairId)
+        if (existing == null) {
+            conversationDao.insertOrUpdate(
+                ConversationEntity(
+                    pairId = pairId,
+                    partnerDisplayName = profiles.partner.name,
+                    partnerImageBase64 = profiles.partner.imageBase64
+                )
+            )
+        } else {
+            conversationDao.updateProfile(pairId, profiles.partner.name, profiles.partner.imageBase64)
         }
-        conversationDao.updateProfile(pairId, profiles.partner.name, profiles.partner.imageBase64)
+
+        // Push local name to backend if it differs (so partner always sees the correct name)
+        if (localName.isNotBlank() &&
+            (profiles.mine.name != localName ||
+                profiles.mine.imageBase64.orEmpty() != keyStoreManager.getMyProfileImage().orEmpty())) {
+            try {
+                apiService.updateProfile(ProfileDto(localName, keyStoreManager.getMyProfileImage()), pairId)
+            } catch (ignored: Exception) {}
+        }
     }
 
     suspend fun updateMyProfile(name: String, image: String?): Boolean {

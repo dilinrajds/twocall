@@ -183,12 +183,13 @@ class WebSocketClient(
         if (!shouldReconnect) return
         reconnectJob?.cancel()
         reconnectJob = scope.launch {
-            delay(retryDelayMs)
-            retryDelayMs = (retryDelayMs + 1000L).coerceAtMost(5000L) // Quick retry: 1s, 2s, 3s, max 5s
-            Log.i(tag, "Attempting WebSocket reconnect in ${retryDelayMs / 1000}s...")
+            // Ensure state is DISCONNECTED BEFORE the delay so connect() isn't blocked
             _connectionState.value = WsConnectionState.DISCONNECTED
             webSocket = null
-            connect(wsUrl)
+            Log.i(tag, "Scheduling WebSocket reconnect in ${retryDelayMs / 1000}s...")
+            delay(retryDelayMs)
+            retryDelayMs = (retryDelayMs + 2000L).coerceAtMost(15000L) // Backoff: 2s → 4s → 6s … max 15s
+            if (shouldReconnect) connect(wsUrl)
         }
     }
 

@@ -41,8 +41,10 @@ fun SplashLoadingScreen(
         delay(350)
         animationStage = 2
 
-        // Stage 3: ZippyCall reveals and navigate
-        val isPaired = checkPairStatus()
+        // Stage 3: Check pair status and navigate.
+        // Use a 5-second timeout – if Render is cold-starting we don't block forever.
+        // checkPairStatus() returns true if we're already paired (tokens present locally).
+        val isPaired = kotlinx.coroutines.withTimeoutOrNull(5000L) { checkPairStatus() } ?: false
         delay(400)
         if (isPaired) {
             onNavigateToConversation()
