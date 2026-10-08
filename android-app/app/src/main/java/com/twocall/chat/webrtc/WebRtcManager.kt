@@ -171,31 +171,31 @@ class WebRtcManager(
         }
 
         isRenderersInitialized = true
-        attachLocalVideoTrackIfReady()
-        attachRemoteVideoTrackIfReady()
+        scope.launch(Dispatchers.Main) {
+            attachLocalVideoTrackIfReady()
+            attachRemoteVideoTrackIfReady()
+        }
     }
 
     private fun attachLocalVideoTrackIfReady() {
-        if (!isRenderersInitialized) return
         val renderer = localRenderer ?: return
         val track = localVideoTrack ?: return
         try {
             track.removeSink(renderer)
             track.addSink(renderer)
-            Log.i(tag, "Attached localVideoTrack to localRenderer")
+            Log.i(tag, "Attached localVideoTrack to localRenderer successfully")
         } catch (e: Exception) {
             Log.w(tag, "Error attaching local sink: ${e.message}")
         }
     }
 
     private fun attachRemoteVideoTrackIfReady() {
-        if (!isRenderersInitialized) return
         val renderer = remoteRenderer ?: return
         val track = remoteVideoTrack ?: return
         try {
             track.removeSink(renderer)
             track.addSink(renderer)
-            Log.i(tag, "Attached remoteVideoTrack to remoteRenderer")
+            Log.i(tag, "Attached remoteVideoTrack to remoteRenderer successfully")
         } catch (e: Exception) {
             Log.w(tag, "Error attaching remote sink: ${e.message}")
         }
@@ -613,6 +613,8 @@ class WebRtcManager(
             PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
             PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
             PeerConnection.IceServer.builder("stun:stun2.l.google.com:19302").createIceServer(),
+            PeerConnection.IceServer.builder("stun:stun3.l.google.com:19302").createIceServer(),
+            PeerConnection.IceServer.builder("stun:stun4.l.google.com:19302").createIceServer(),
             PeerConnection.IceServer.builder("stun:stun.services.mozilla.com").createIceServer()
         )
 
@@ -753,10 +755,20 @@ class WebRtcManager(
             audioManager.isSpeakerphoneOn = isVideo
             _isSpeakerOn.value = isVideo
             CallService.startCallService(context, isVideo)
+            if (isVideo) {
+                scope.launch(Dispatchers.Main) {
+                    attachLocalVideoTrackIfReady()
+                    attachRemoteVideoTrackIfReady()
+                }
+            }
         }
     }
 
     private fun setupLocalTracks(isVideo: Boolean, localRenderer: SurfaceViewRenderer? = null) {
+        if (localRenderer != null) {
+            this.localRenderer = localRenderer
+        }
+
         if (localAudioTrack == null) {
             val audioSource = peerConnectionFactory?.createAudioSource(MediaConstraints())
             localAudioTrack = peerConnectionFactory?.createAudioTrack("local_audio_track", audioSource)
@@ -781,20 +793,15 @@ class WebRtcManager(
                     val videoSource = peerConnectionFactory?.createVideoSource(videoCapturer!!.isScreencast)
                     videoCapturer?.initialize(surfaceTextureHelper, context, videoSource?.capturerObserver)
                     try {
-                        videoCapturer?.startCapture(1920, 1080, 30)
-                        Log.i(tag, "Camera capture started at Full HD (1920x1080@30fps)")
+                        videoCapturer?.startCapture(1280, 720, 30)
+                        Log.i(tag, "Camera capture started at HD (1280x720@30fps)")
                     } catch (e: Exception) {
-                        Log.w(tag, "1080p capture failed, trying 720p: ${e.message}")
+                        Log.w(tag, "720p capture failed, trying 640x480: ${e.message}")
                         try {
-                            videoCapturer?.startCapture(1280, 720, 30)
-                            Log.i(tag, "Camera capture started at HD (1280x720@30fps)")
+                            videoCapturer?.startCapture(640, 480, 30)
+                            Log.i(tag, "Camera capture started at VGA (640x480@30fps)")
                         } catch (e2: Exception) {
-                            Log.w(tag, "720p capture failed, trying 640x480: ${e2.message}")
-                            try {
-                                videoCapturer?.startCapture(640, 480, 30)
-                            } catch (e3: Exception) {
-                                Log.e(tag, "Fallback startCapture failed: ${e3.message}")
-                            }
+                            Log.e(tag, "Fallback startCapture failed: ${e2.message}")
                         }
                     }
 
@@ -804,12 +811,14 @@ class WebRtcManager(
                         peerConnection?.addTrack(it, listOf("media_stream"))
                         Log.i(tag, "Local video track created, enabled, and added to PeerConnection")
                     }
+                    scope.launch(Dispatchers.Main) {
+                        attachLocalVideoTrackIfReady()
+                    }
                 }
             }
         }
 
-        localRenderer?.let { renderer ->
-            this.localRenderer = renderer
+        scope.launch(Dispatchers.Main) {
             attachLocalVideoTrackIfReady()
         }
     }
@@ -820,12 +829,12 @@ class WebRtcManager(
             val parameters = sender.parameters
             if (parameters.encodings != null && parameters.encodings.isNotEmpty()) {
                 for (encoding in parameters.encodings) {
-                    encoding.maxBitrateBps = 4_000_000 // 4.0 Mbps max for crisp Full HD 1080p
-                    encoding.minBitrateBps = 800_000   // 800 kbps min
+                    encoding.maxBitrateBps = 2_000_000 // 2.0 Mbps max for crisp 720p HD
+                    encoding.minBitrateBps = 150_000   // 150 kbps min for instant low-latency streaming
                     encoding.maxFramerate = 30
                 }
                 sender.parameters = parameters
-                Log.i(tag, "Configured video sender bitrate parameters (max: 4Mbps, min: 800kbps, 30fps)")
+                Log.i(tag, "Configured video sender bitrate parameters (max: 2Mbps, min: 150kbps, 30fps)")
             }
         } catch (e: Exception) {
             Log.w(tag, "Could not set video sender bitrate parameters: ${e.message}")
@@ -833,35 +842,46 @@ class WebRtcManager(
     }
 
     private fun createCameraCapturer(): CameraVideoCapturer? {
+        // Try Camera2 first if supported
+        if (Camera2Enumerator.isSupported(context)) {
+            try {
+                val enumerator = Camera2Enumerator(context)
+                val capturer = findCameraCapturer(enumerator)
+                if (capturer != null) return capturer
+            } catch (e: Exception) {
+                Log.w(tag, "Camera2Enumerator failed, trying Camera1: ${e.message}")
+            }
+        }
+        // Fallback to Camera1
         return try {
-            val enumerator = if (Camera2Enumerator.isSupported(context)) {
-                Camera2Enumerator(context)
-            } else {
-                Camera1Enumerator(true)
-            }
-            for (deviceName in enumerator.deviceNames) {
-                if (enumerator.isFrontFacing(deviceName)) {
-                    val capturer = enumerator.createCapturer(deviceName, null)
-                    if (capturer != null) {
-                        Log.i(tag, "Selected front camera: $deviceName")
-                        return capturer
-                    }
-                }
-            }
-            for (deviceName in enumerator.deviceNames) {
-                if (!enumerator.isFrontFacing(deviceName)) {
-                    val capturer = enumerator.createCapturer(deviceName, null)
-                    if (capturer != null) {
-                        Log.i(tag, "Selected rear camera: $deviceName")
-                        return capturer
-                    }
-                }
-            }
-            null
+            val enumerator = Camera1Enumerator(true)
+            findCameraCapturer(enumerator)
         } catch (e: Exception) {
-            Log.e(tag, "Error creating camera capturer: ${e.message}")
+            Log.e(tag, "Camera1Enumerator also failed: ${e.message}")
             null
         }
+    }
+
+    private fun findCameraCapturer(enumerator: CameraEnumerator): CameraVideoCapturer? {
+        for (deviceName in enumerator.deviceNames) {
+            if (enumerator.isFrontFacing(deviceName)) {
+                val capturer = enumerator.createCapturer(deviceName, null)
+                if (capturer != null) {
+                    Log.i(tag, "Selected front camera: $deviceName")
+                    return capturer
+                }
+            }
+        }
+        for (deviceName in enumerator.deviceNames) {
+            if (!enumerator.isFrontFacing(deviceName)) {
+                val capturer = enumerator.createCapturer(deviceName, null)
+                if (capturer != null) {
+                    Log.i(tag, "Selected rear camera: $deviceName")
+                    return capturer
+                }
+            }
+        }
+        return null
     }
 
     fun toggleMic(): Boolean {

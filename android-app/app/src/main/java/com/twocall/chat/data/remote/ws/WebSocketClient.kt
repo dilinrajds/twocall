@@ -66,13 +66,15 @@ class WebSocketClient(
         val cleanBaseUrl = if (wsUrl.contains("?")) wsUrl.substringBefore("?") else wsUrl
         lastRawWsUrl = cleanBaseUrl
 
-        val token = keyStoreManager.getAccessToken() ?: run {
-            Log.w(tag, "Cannot connect WebSocket: No access token found")
-            return
-        }
+        val token = keyStoreManager.getAccessToken() 
+            ?: keyStoreManager.getAllPairIds().firstOrNull()?.let { keyStoreManager.getAccessToken(it) }
+            ?: run {
+                Log.w(tag, "Cannot connect WebSocket: No access token found")
+                return
+            }
 
         val urlWithAuth = "$cleanBaseUrl?token=$token"
-        connectedPairId = keyStoreManager.getActivePairId()
+        connectedPairId = keyStoreManager.getActivePairId() ?: keyStoreManager.getAllPairIds().firstOrNull()
         val request = Request.Builder().url(urlWithAuth).build()
 
         // Cancel any stale socket before creating a new one
@@ -84,11 +86,11 @@ class WebSocketClient(
         _connectionState.value = WsConnectionState.CONNECTING
         Log.i(tag, "Connecting WebSocket to $cleanBaseUrl...")
 
-        // Watchdog: If connection doesn't succeed within 12 seconds, retry
+        // Watchdog: If connection doesn't succeed within 10 seconds, retry
         connectionWatchdogJob = scope.launch {
-            delay(12000L)
+            delay(10000L)
             if (_connectionState.value == WsConnectionState.CONNECTING) {
-                Log.w(tag, "WebSocket connection attempt timed out after 12s, scheduling reconnect...")
+                Log.w(tag, "WebSocket connection attempt timed out after 10s, scheduling reconnect...")
                 try {
                     webSocket?.cancel()
                 } catch (ignored: Exception) {}
@@ -103,7 +105,7 @@ class WebSocketClient(
                 connectionWatchdogJob?.cancel()
                 Log.i(tag, "WebSocket connected successfully!")
                 _connectionState.value = WsConnectionState.CONNECTED
-                retryDelayMs = 2000L // Reset backoff
+                retryDelayMs = 1000L // Reset backoff
             }
 
             override fun onMessage(ws: WebSocket, text: String) {
@@ -122,8 +124,13 @@ class WebSocketClient(
             override fun onClosing(ws: WebSocket, code: Int, reason: String) {
                 connectionWatchdogJob?.cancel()
                 ws.close(1000, null)
-                webSocket = null
-                _connectionState.value = WsConnectionState.DISCONNECTED
+                if (webSocket == ws) {
+                    webSocket = null
+                    _connectionState.value = WsConnectionState.DISCONNECTED
+                }
+                if (shouldReconnect) {
+                    scheduleReconnect(cleanBaseUrl)
+                }
             }
 
             override fun onClosed(ws: WebSocket, code: Int, reason: String) {
@@ -132,7 +139,7 @@ class WebSocketClient(
                     webSocket = null
                     _connectionState.value = WsConnectionState.DISCONNECTED
                 }
-                if (reason != "Reconnecting" && reason != "Normal closure" && shouldReconnect) {
+                if (shouldReconnect) {
                     scheduleReconnect(cleanBaseUrl)
                 }
             }
@@ -177,7 +184,7 @@ class WebSocketClient(
         reconnectJob?.cancel()
         reconnectJob = scope.launch {
             delay(retryDelayMs)
-            retryDelayMs = (retryDelayMs * 2).coerceAtMost(30000L) // Exponential backoff up to 30s
+            retryDelayMs = (retryDelayMs + 1000L).coerceAtMost(5000L) // Quick retry: 1s, 2s, 3s, max 5s
             Log.i(tag, "Attempting WebSocket reconnect in ${retryDelayMs / 1000}s...")
             _connectionState.value = WsConnectionState.DISCONNECTED
             webSocket = null
@@ -186,14 +193,10 @@ class WebSocketClient(
     }
 
     fun reconnectNow() {
-        if (_connectionState.value == WsConnectionState.CONNECTED ||
-            _connectionState.value == WsConnectionState.CONNECTING) {
-            Log.d(tag, "reconnectNow: already connected or connecting, skipping")
-            return
-        }
         shouldReconnect = true
-        retryDelayMs = 2000L
+        retryDelayMs = 1000L
         reconnectJob?.cancel()
+        connectionWatchdogJob?.cancel()
         try {
             webSocket?.cancel()
         } catch (ignored: Exception) {}
@@ -222,12 +225,31 @@ class WebSocketClient(
         )
 
         val json = gson.toJson(event)
-        val ws = webSocket
-        val success = ws?.send(json) ?: false
+        var ws = webSocket
+        var success = ws?.send(json) ?: false
         Log.i(tag, "sendEvent: $eventType, sent=$success, wsConnected=${_connectionState.value == WsConnectionState.CONNECTED}")
+        
         if (!success) {
             Log.w(tag, "sendEvent: failed to send $eventType! Triggering reconnectNow()...")
             reconnectNow()
+
+            // If it's a critical signaling event, wait briefly and retry once
+            if (eventType.startsWith("CALL_") || eventType == "ICE_CANDIDATE") {
+                try {
+                    val retryThread = Thread {
+                        var waitCount = 0
+                        while (waitCount < 8 && _connectionState.value != WsConnectionState.CONNECTED) {
+                            Thread.sleep(250)
+                            waitCount++
+                        }
+                        if (_connectionState.value == WsConnectionState.CONNECTED) {
+                            val retried = webSocket?.send(json) ?: false
+                            Log.i(tag, "Retried sendEvent $eventType: success=$retried")
+                        }
+                    }
+                    retryThread.start()
+                } catch (ignored: Exception) {}
+            }
         }
         return success
     }
@@ -235,6 +257,7 @@ class WebSocketClient(
     fun disconnect() {
         shouldReconnect = false
         reconnectJob?.cancel()
+        connectionWatchdogJob?.cancel()
         webSocket?.close(1000, "Normal closure")
         webSocket = null
         _connectionState.value = WsConnectionState.DISCONNECTED

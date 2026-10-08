@@ -178,7 +178,7 @@ class KeyStoreManager(context: Context) {
         encryptedPrefs.edit().putString(KEY_ACTIVE_PAIR_ID, pairId).apply()
     }
 
-    fun getActivePairId(): String? = encryptedPrefs.getString(KEY_ACTIVE_PAIR_ID, null)
+    fun getActivePairId(): String? = encryptedPrefs.getString(KEY_ACTIVE_PAIR_ID, null) ?: getAllPairIds().firstOrNull()
 
     // ── Per-Pair Credential Accessors ────────────────────────────────────────
 

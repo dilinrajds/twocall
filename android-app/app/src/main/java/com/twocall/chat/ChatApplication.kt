@@ -90,10 +90,8 @@ class ChatApplication : Application() {
                 if (startedActivities == 1) {
                     // App entered foreground
                     if (keyStoreManager.isPaired()) {
-                        if (webSocketClient.connectionState.value == WsConnectionState.DISCONNECTED) {
-                            Log.i(tag, "App foregrounded and WebSocket disconnected — reconnecting")
-                            connectWebSocket()
-                        }
+                        Log.i(tag, "App entered foreground: reconnecting WebSocket and syncing messages")
+                        connectWebSocket()
                         syncMessagesInBackground()
                     }
                 }
@@ -109,6 +107,26 @@ class ChatApplication : Application() {
             override fun onActivitySaveInstanceState(activity: android.app.Activity, outState: android.os.Bundle) {}
             override fun onActivityDestroyed(activity: android.app.Activity) {}
         })
+
+        // Network connectivity observer: reconnect automatically when device switches Wi-Fi/mobile network
+        try {
+            val connectivityManager = getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+            connectivityManager?.registerDefaultNetworkCallback(object : android.net.ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: android.net.Network) {
+                    Log.i(tag, "Network is available: triggering reconnect and sync")
+                    if (keyStoreManager.isPaired()) {
+                        webSocketClient.reconnectNow()
+                        syncMessagesInBackground()
+                    }
+                }
+
+                override fun onLost(network: android.net.Network) {
+                    Log.w(tag, "Network connection lost")
+                }
+            })
+        } catch (e: Exception) {
+            Log.w(tag, "Failed to register network callback: ${e.message}")
+        }
     }
 
     private fun createNotificationChannels() {

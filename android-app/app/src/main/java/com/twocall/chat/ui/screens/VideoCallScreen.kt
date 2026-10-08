@@ -127,12 +127,12 @@ fun VideoCallScreen(
             }
     ) {
         // 1. Remote Video Feed (Full Screen base)
-        // BUG 2 FIX: Do NOT call setEnableHardwareScaler/setScalingType before init().
-        // All renderer configuration is done inside WebRtcManager.initSurfaceViews()
-        // after EGL context init. Calling them here (pre-init) is either a no-op or crash.
         AndroidView(
             factory = { context ->
-                SurfaceViewRenderer(context).also { renderer ->
+                SurfaceViewRenderer(context).apply {
+                    setEnableHardwareScaler(true)
+                    setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+                }.also { renderer ->
                     remoteRenderer = renderer
                 }
             },
@@ -140,9 +140,9 @@ fun VideoCallScreen(
         )
 
         // 2. Pre-connection Betta Aquatic Visualizer
-        // Smoothly fades away as soon as the first video frame renders!
+        // Smoothly fades away as soon as the call connects or first video frame renders!
         AnimatedVisibility(
-            visible = !hasRemoteVideoFrame,
+            visible = !hasRemoteVideoFrame && callState != CallState.CONNECTED,
             enter = fadeIn(tween(200)),
             exit = fadeOut(tween(400)),
             modifier = Modifier.fillMaxSize()
@@ -175,7 +175,6 @@ fun VideoCallScreen(
                 .statusBarsPadding()
                 .padding(top = 16.dp, end = 16.dp)
                 .size(118.dp, 168.dp)
-                .shadow(elevation = 14.dp, shape = RoundedCornerShape(22.dp), spotColor = AquaCyan.copy(alpha = 0.35f))
                 .clip(RoundedCornerShape(22.dp))
                 .border(
                     width = 1.5.dp,
@@ -183,11 +182,14 @@ fun VideoCallScreen(
                     shape = RoundedCornerShape(22.dp)
                 )
         ) {
-            // BUG 2 FIX: Same as remote — no pre-init configuration calls.
-            // setZOrderMediaOverlay/setMirror/setScalingType are applied in initSurfaceViews.
             AndroidView(
                 factory = { context ->
-                    SurfaceViewRenderer(context).also { renderer ->
+                    SurfaceViewRenderer(context).apply {
+                        setZOrderMediaOverlay(true)
+                        setEnableHardwareScaler(true)
+                        setMirror(true)
+                        setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+                    }.also { renderer ->
                         localRenderer = renderer
                     }
                 },
