@@ -21,9 +21,20 @@ public class FirebaseConfig {
     @Value("${app.firebase.credentials-path:./config/firebase-service-account.json}")
     private String credentialsPath;
 
+    @Value("${FIREBASE_SERVICE_ACCOUNT_JSON:}")
+    private String credentialsJson;
+
     @PostConstruct
     public void initFirebase() {
         try {
+            if (!credentialsJson.isBlank() && FirebaseApp.getApps().isEmpty()) {
+                try (InputStream stream = new java.io.ByteArrayInputStream(credentialsJson.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
+                    FirebaseApp.initializeApp(FirebaseOptions.builder()
+                            .setCredentials(GoogleCredentials.fromStream(stream)).build());
+                }
+                log.info("Firebase Cloud Messaging initialized from environment");
+                return;
+            }
             File file = new File(credentialsPath);
             if (file.exists() && file.isFile()) {
                 try (InputStream serviceAccount = new FileInputStream(file)) {

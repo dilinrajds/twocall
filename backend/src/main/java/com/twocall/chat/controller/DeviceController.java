@@ -19,10 +19,26 @@ public class DeviceController {
 
     private final PushNotificationService pushNotificationService;
     private final PairAccessValidator accessValidator;
+    private final com.twocall.chat.service.ProfileService profileService;
 
-    public DeviceController(PushNotificationService pushNotificationService, PairAccessValidator accessValidator) {
+    public DeviceController(PushNotificationService pushNotificationService, PairAccessValidator accessValidator,
+                            com.twocall.chat.service.ProfileService profileService) {
         this.pushNotificationService = pushNotificationService;
         this.accessValidator = accessValidator;
+        this.profileService = profileService;
+    }
+
+    @org.springframework.web.bind.annotation.GetMapping("/profile")
+    public Map<String, Map<String, String>> profile() {
+        var principal = accessValidator.getAuthenticatedPrincipal();
+        return profileService.get(principal.getPairId(), principal.getDeviceId());
+    }
+
+    @org.springframework.web.bind.annotation.PutMapping("/profile")
+    public Map<String, String> updateProfile(@Valid @RequestBody com.twocall.chat.dto.request.UpdateProfileRequest request) {
+        var principal = accessValidator.getAuthenticatedPrincipal();
+        profileService.update(principal.getPairId(), principal.getDeviceId(), request);
+        return Map.of("message", "Profile updated");
     }
 
     @PostMapping("/push-token")

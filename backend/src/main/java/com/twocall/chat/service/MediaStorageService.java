@@ -86,7 +86,7 @@ public class MediaStorageService {
             throw new SecurityException("Cannot store file outside target directory");
         }
 
-        // Calculate SHA-256 during copy
+        // Calculate SHA-256 during copy in a single pass
         MessageDigest digest;
         try {
             digest = MessageDigest.getInstance("SHA-256");
@@ -94,16 +94,18 @@ public class MediaStorageService {
             throw new RuntimeException("SHA-256 not available", e);
         }
 
-        try (InputStream in = file.getInputStream()) {
+        // Write to a temp file while computing hash, then move atomically
+        Path tempFile = pairDirectory.resolve(cleanFileName + ".tmp").normalize();
+        try (InputStream in = file.getInputStream();
+             java.io.OutputStream out = Files.newOutputStream(tempFile)) {
             byte[] buffer = new byte[8192];
             int read;
             while ((read = in.read(buffer)) != -1) {
                 digest.update(buffer, 0, read);
+                out.write(buffer, 0, read);
             }
         }
-
-        // Store file
-        Files.copy(file.getInputStream(), destination, StandardCopyOption.REPLACE_EXISTING);
+        Files.move(tempFile, destination, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         String sha256 = HexFormat.of().formatHex(digest.digest());
 
         Attachment attachment = new Attachment(

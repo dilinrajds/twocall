@@ -17,17 +17,16 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
-    <!-- Foreground Services for WebRTC Call Sessions -->
+    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
 
     <application
         android:name=".ChatApplication"
         android:allowBackup="false"
         android:icon="@drawable/ic_launcher"
-        android:label="TwoCall"
+        android:label="@string/app_name"
         android:roundIcon="@drawable/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar"
@@ -48,7 +47,7 @@
         <service
             android:name=".webrtc.CallService"
             android:exported="false"
-            android:foregroundServiceType="microphone|camera|phoneCall" />
+            android:foregroundServiceType="microphone|camera" />
 
         <!-- Firebase Cloud Messaging Service -->
         <service
@@ -58,6 +57,15 @@
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
+
+        <!-- Notification Call Action Receiver (Decline) -->
+        <receiver
+            android:name=".fcm.CallActionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.twocall.chat.ACTION_DECLINE_CALL" />
+            </intent-filter>
+        </receiver>
 
     </application>
 

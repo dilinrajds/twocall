@@ -4,6 +4,10 @@
 *.pem
 *.key
 *.jks
+google-services.json
+firebase-service-account.json
+.gradle-native/
+.vscode/
 
 # Java & Gradle
 .gradle/

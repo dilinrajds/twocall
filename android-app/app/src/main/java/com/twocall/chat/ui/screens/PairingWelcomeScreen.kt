@@ -1,28 +1,29 @@
 package com.twocall.chat.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.AddLink
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.QrCode
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.twocall.chat.ui.components.AnimatedGlassBackground
-import com.twocall.chat.ui.components.GlassButton
-import com.twocall.chat.ui.components.GlassCard
+import com.twocall.chat.ui.components.*
 import com.twocall.chat.ui.theme.*
 
 @Composable
@@ -30,114 +31,199 @@ fun PairingWelcomeScreen(
     onCreatePairClick: () -> Unit,
     onJoinPartnerClick: () -> Unit
 ) {
-    AnimatedGlassBackground {
+    ZippyAquaticBackground {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(24.dp)
-                .padding(vertical = 32.dp),
+                .padding(vertical = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
+            // Top App Title & Twin Betta Encounter Animation
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.padding(top = 32.dp)
+                modifier = Modifier.padding(top = 16.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(90.dp)
-                        .clip(CircleShape)
-                        .background(
-                            Brush.linearGradient(
-                                colors = listOf(NeonCyan.copy(alpha = 0.25f), NeonPurple.copy(alpha = 0.25f))
-                            )
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(68.dp)
-                            .clip(CircleShape)
-                            .background(
-                                Brush.linearGradient(
-                                    colors = listOf(NeonCyan, NeonIndigo)
-                                )
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Shield,
-                            contentDescription = "Private Shield",
-                            tint = Color.White,
-                            modifier = Modifier.size(36.dp)
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(24.dp))
-
                 Text(
-                    text = "Private Space for Two",
-                    style = MaterialTheme.typography.headlineMedium.copy(
+                    text = "ZippyCall",
+                    style = MaterialTheme.typography.headlineLarge.copy(
                         fontWeight = FontWeight.ExtraBold,
-                        fontSize = 28.sp
+                        fontSize = 34.sp,
+                        letterSpacing = 1.5.sp
                     ),
                     color = Color.White
                 )
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(4.dp))
 
-                GlassCard(
-                    modifier = Modifier.padding(horizontal = 12.dp),
+                Text(
+                    text = "Private. Just for two.",
+                    fontSize = 14.sp,
+                    color = AquaCyan,
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = 1.sp
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // Beautiful Twin Betta Encounter Visualization
+                Box(
+                    modifier = Modifier
+                        .size(200.dp)
+                        .clip(CircleShape)
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(AquaticSurface.copy(alpha = 0.6f), Color.Transparent)
+                            )
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    ZippyConcentricRipples(
+                        modifier = Modifier.fillMaxSize(),
+                        baseColor = AquaCyan.copy(alpha = 0.6f),
+                        rippleCount = 2,
+                        maxRadius = 95.dp
+                    )
+                    ZippyTwinBettaEncounter(
+                        modifier = Modifier.size(190.dp),
+                        progress = 0.85f
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                ZippyNeumorphicCard(
+                    modifier = Modifier.padding(horizontal = 8.dp),
                     shape = RoundedCornerShape(20.dp),
-                    borderColor = NeonCyan.copy(alpha = 0.25f)
+                    backgroundColor = AquaticSurface.copy(alpha = 0.45f)
                 ) {
                     Text(
-                        text = "Zero tracking. Zero central storage.\nPair your device once with your partner to communicate with hardware-bound encryption.",
-                        style = MaterialTheme.typography.bodyMedium,
+                        text = "Like two Betta fish in calm waters, connect your device once with your partner through end-to-end encryption.",
+                        style = MaterialTheme.typography.bodySmall,
                         textAlign = TextAlign.Center,
-                        color = DarkOnSurfaceVariant,
-                        lineHeight = 22.sp
+                        color = TextSecondaryDark,
+                        lineHeight = 19.sp,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
                     )
                 }
             }
 
+            // Neumorphic Action Options
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                GlassButton(
-                    onClick = onCreatePairClick,
-                    gradientColors = listOf(NeonCyan, NeonIndigo),
+                // Card 1: Create New Pair Code
+                ZippyNeumorphicCard(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(58.dp)
+                        .clickable { onCreatePairClick() },
+                    shape = RoundedCornerShape(22.dp),
+                    backgroundColor = NeumorphicBaseDark,
+                    borderStroke = 1.2.dp,
+                    highlightColor = AquaCyan.copy(alpha = 0.3f)
                 ) {
-                    Icon(imageVector = Icons.Default.AddLink, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text(
-                        text = "1. Create New Pair Code",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 18.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                .background(Brush.linearGradient(listOf(AquaCyan, OceanIndigo))),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AddLink,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(16.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Create Private Pair",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp
+                            )
+                            Text(
+                                text = "Generate a 6-digit code for your partner",
+                                color = TextSecondaryDark,
+                                fontSize = 12.sp
+                            )
+                        }
+
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            tint = AquaCyan,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
 
-                GlassButton(
-                    onClick = onJoinPartnerClick,
-                    gradientColors = listOf(NeonPurple, NeonIndigo),
+                // Card 2: Join Partner Code
+                ZippyNeumorphicCard(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(58.dp)
+                        .clickable { onJoinPartnerClick() },
+                    shape = RoundedCornerShape(22.dp),
+                    backgroundColor = NeumorphicBaseDark,
+                    borderStroke = 1.2.dp,
+                    highlightColor = BettaViolet.copy(alpha = 0.3f)
                 ) {
-                    Icon(imageVector = Icons.Default.QrCode, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text(
-                        text = "2. Enter Partner's Code",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 18.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                .background(Brush.linearGradient(listOf(BettaViolet, BiolumPink))),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Key,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(16.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Join Partner's Space",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp
+                            )
+                            Text(
+                                text = "Enter the 6 digits shared by your partner",
+                                color = TextSecondaryDark,
+                                fontSize = 12.sp
+                            )
+                        }
+
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            tint = BiolumPink,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
         }

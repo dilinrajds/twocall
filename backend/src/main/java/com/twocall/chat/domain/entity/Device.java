@@ -26,6 +26,12 @@ public class Device {
     @Column(name = "device_label", length = 64)
     private String deviceLabel;
 
+    @Column(name = "profile_image", columnDefinition = "TEXT")
+    private String profileImage;
+
+    public String getProfileImage() { return profileImage; }
+    public void setProfileImage(String profileImage) { this.profileImage = profileImage; }
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 

@@ -45,17 +45,36 @@ fun VideoCallScreen(
     val durationSeconds by viewModel.callDurationSeconds.collectAsState()
     val hasRemoteVideoFrame by viewModel.hasRemoteVideoFrame.collectAsState()
     val view = LocalView.current
+    val profile by viewModel.partnerProfile.collectAsState()
+    val autoAccept by viewModel.autoAccept.collectAsState()
+
+    DisposableEffect(view, callState) {
+        val previous = view.keepScreenOn
+        view.keepScreenOn = callState !in listOf(CallState.IDLE, CallState.ENDED, CallState.DECLINED, CallState.FAILED)
+        onDispose { view.keepScreenOn = previous }
+    }
 
     var localRenderer by remember { mutableStateOf<SurfaceViewRenderer?>(null) }
     var remoteRenderer by remember { mutableStateOf<SurfaceViewRenderer?>(null) }
+
+    LaunchedEffect(autoAccept, localRenderer, remoteRenderer, callState) {
+        if (autoAccept && callState == CallState.INCOMING_RINGING && localRenderer != null && remoteRenderer != null) {
+            viewModel.acceptCall(localRenderer, remoteRenderer)
+        }
+    }
 
     // Controls visibility auto-fade timer
     var areControlsVisible by remember { mutableStateOf(true) }
     var userInteractionTimestamp by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
+    LaunchedEffect(Unit) {
+        viewModel.remoteCallEndedEvent.collect {
+            onCallEnded()
+        }
+    }
+
     LaunchedEffect(callState) {
         if (callState == CallState.ENDED || callState == CallState.DECLINED || callState == CallState.FAILED) {
-            delay(1400)
             onCallEnded()
         }
     }
@@ -187,8 +206,10 @@ fun VideoCallScreen(
                 .padding(top = 16.dp)
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                ZippyAvatar(name = profile?.partnerDisplayName ?: "Partner", imageBase64 = profile?.partnerImageBase64,
+                    size = 46.dp, showOnlineDot = false)
                 Text(
-                    text = "Partner",
+                    text = profile?.partnerDisplayName?.takeIf { it.isNotBlank() } ?: "Partner",
                     style = MaterialTheme.typography.titleLarge.copy(
                         fontWeight = FontWeight.Bold
                     ),

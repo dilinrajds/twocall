@@ -34,22 +34,28 @@ data class CallSessionData(
     val callId: String,
     val isVideo: Boolean,
     val isOutgoing: Boolean,
-    val partnerDeviceId: String? = null
+    val partnerDeviceId: String? = null,
+    val pairId: String? = null
 )
 
 data class PendingIncomingCall(
     val callId: String,
     val isVideo: Boolean,
     val sdpOffer: String,
-    val callerDeviceId: String? = null
+    val callerDeviceId: String? = null,
+    val pairId: String? = null
 )
 
 class WebRtcManager(
     private val context: Context,
     private val apiService: ChatApiService,
     private val webSocketClient: WebSocketClient,
+    private val keyStoreManager: com.twocall.chat.crypto.KeyStoreManager,
     private val gson: Gson = Gson()
 ) {
+
+    /** Invoked when remote side ends the call (or connection fails). UI should navigate back to chat. */
+    var onCallEndedRemotely: (() -> Unit)? = null
 
     private val tag = "WebRtcManager"
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -212,10 +218,12 @@ class WebRtcManager(
                 val callType = payload["callType"] as? String ?: "AUDIO"
                 val sdp = payload["sdp"] as? String ?: return
                 val isVideo = "VIDEO".equals(callType, ignoreCase = true)
+                if (_currentSession.value?.callId == callId && _callState.value != CallState.IDLE) return
+                if (_callState.value !in listOf(CallState.IDLE, CallState.ENDED, CallState.FAILED, CallState.DECLINED)) return
 
                 Log.i(tag, "CALL STATE: INCOMING_RINGING received (callId: $callId, isVideo: $isVideo)")
-                _currentSession.value = CallSessionData(callId, isVideo, isOutgoing = false, event.senderDeviceId)
-                pendingIncomingCall = PendingIncomingCall(callId, isVideo, sdp, event.senderDeviceId)
+                _currentSession.value = CallSessionData(callId, isVideo, isOutgoing = false, partnerDeviceId = event.senderDeviceId, pairId = event.pairId)
+                pendingIncomingCall = PendingIncomingCall(callId, isVideo, sdp, callerDeviceId = event.senderDeviceId, pairId = event.pairId)
                 _hasRemoteVideoFrame.value = false
                 _callState.value = CallState.INCOMING_RINGING
 
@@ -283,9 +291,28 @@ class WebRtcManager(
 
             "CALL_END" -> {
                 Log.i(tag, "Call ended by partner")
-                endCallLocally()
+                endCallLocally(notifyRemote = true)
             }
         }
+    }
+
+    suspend fun recoverIncomingCall(callId: String, pairId: String): Boolean {
+        if (_currentSession.value?.callId == callId && _callState.value == CallState.INCOMING_RINGING) return true
+        val response = apiService.recoverIncomingCall(callId, pairId)
+        val call = response.body()?.takeIf { response.isSuccessful && it.sdp.isNotBlank() } ?: return false
+        if (_callState.value !in listOf(CallState.IDLE, CallState.ENDED, CallState.FAILED, CallState.DECLINED)) return false
+        pendingIncomingCall = PendingIncomingCall(call.callId, call.callType == "VIDEO", call.sdp, call.callerDeviceId, call.pairId)
+        synchronized(queuedRemoteIceCandidates) {
+            for (candidate in call.iceCandidates) {
+                if (queuedRemoteIceCandidates.none { it.sdp == candidate.candidate }) {
+                    queuedRemoteIceCandidates.add(IceCandidate(candidate.sdpMid, candidate.sdpMLineIndex, candidate.candidate))
+                }
+            }
+        }
+        _currentSession.value = CallSessionData(call.callId, call.callType == "VIDEO", false, call.callerDeviceId, call.pairId)
+        _hasRemoteVideoFrame.value = false
+        _callState.value = CallState.INCOMING_RINGING
+        return true
     }
 
     private fun drainQueuedIceCandidates() {
@@ -303,10 +330,12 @@ class WebRtcManager(
         if (remoteRenderer != null) this.remoteRenderer = remoteRenderer
 
         val callId = UUID.randomUUID().toString()
-        _currentSession.value = CallSessionData(callId, isVideo, isOutgoing = true)
+        val pairId = keyStoreManager.getActivePairId()
+        val partnerDeviceId = keyStoreManager.getPartnerDeviceId()
+        _currentSession.value = CallSessionData(callId, isVideo, isOutgoing = true, partnerDeviceId = partnerDeviceId, pairId = pairId)
         _callState.value = CallState.OUTGOING_CALLING
         _hasRemoteVideoFrame.value = false
-        Log.i(tag, "CALL STATE: IDLE -> OUTGOING_CALLING (callId: $callId, isVideo: $isVideo)")
+        Log.i(tag, "CALL STATE: IDLE -> OUTGOING_CALLING (callId: $callId, isVideo: $isVideo, pairId: $pairId)")
 
         scope.launch(Dispatchers.IO) {
             createPeerConnection(callId, isVideo, localRenderer)
@@ -337,7 +366,7 @@ class WebRtcManager(
                                     "callType" to (if (isVideo) "VIDEO" else "AUDIO"),
                                     "sdp" to sdp.description
                                 )
-                                webSocketClient.sendEvent("CALL_OFFER", payload)
+                                webSocketClient.sendEvent("CALL_OFFER", payload, targetPairId = pairId)
                                 Log.i(tag, "Local offer set and CALL_OFFER sent for callId: $callId")
                             }
                             override fun onSetFailure(error: String?) {
@@ -417,7 +446,7 @@ class WebRtcManager(
                                             "callId" to pending.callId,
                                             "sdp" to sdp.description
                                         )
-                                        webSocketClient.sendEvent("CALL_ANSWER", payload)
+                                        webSocketClient.sendEvent("CALL_ANSWER", payload, targetPairId = pending.pairId)
                                         Log.i(tag, "Local answer set and CALL_ANSWER sent for callId: ${pending.callId}")
                                         pendingIncomingCall = null
 
@@ -456,9 +485,10 @@ class WebRtcManager(
     fun rejectIncomingCall() {
         ChatFirebaseMessagingService.cancelIncomingCallNotification(context)
         val callId = pendingIncomingCall?.callId ?: _currentSession.value?.callId
+        val targetPairId = pendingIncomingCall?.pairId ?: _currentSession.value?.pairId
         if (callId != null) {
-            webSocketClient.sendEvent("CALL_REJECT", mapOf("callId" to callId, "reason" to "REJECTED"))
-            Log.i(tag, "Sent CALL_REJECT for callId: $callId")
+            webSocketClient.sendEvent("CALL_REJECT", mapOf("callId" to callId, "reason" to "REJECTED"), targetPairId = targetPairId)
+            Log.i(tag, "Sent CALL_REJECT for callId: $callId, pairId: $targetPairId")
         }
         pendingIncomingCall = null
         _callState.value = CallState.DECLINED
@@ -471,23 +501,25 @@ class WebRtcManager(
     fun endCall() {
         ChatFirebaseMessagingService.cancelIncomingCallNotification(context)
         val callId = pendingIncomingCall?.callId ?: _currentSession.value?.callId
+        val targetPairId = pendingIncomingCall?.pairId ?: _currentSession.value?.pairId
         if (callId != null) {
-            webSocketClient.sendEvent("CALL_END", mapOf("callId" to callId, "reason" to "USER_HANGUP"))
-            Log.i(tag, "Sent CALL_END for callId: $callId")
+            webSocketClient.sendEvent("CALL_END", mapOf("callId" to callId, "reason" to "USER_HANGUP"), targetPairId = targetPairId)
+            Log.i(tag, "Sent CALL_END for callId: $callId, pairId: $targetPairId")
         }
         pendingIncomingCall = null
-        endCallLocally()
+        endCallLocally(notifyRemote = false)
     }
 
     @Volatile
     private var isTearingDown = false
 
-    private fun endCallLocally() {
+    private fun endCallLocally(notifyRemote: Boolean = false) {
         if (_callState.value == CallState.ENDED || isTearingDown) {
             return
         }
         isTearingDown = true
         _callState.value = CallState.ENDED
+        ChatFirebaseMessagingService.cancelIncomingCallNotification(context)
         _hasRemoteVideoFrame.value = false
         pendingIncomingCall = null
 
@@ -566,6 +598,10 @@ class WebRtcManager(
                     } else {
                         Log.i(tag, "CALL STATE: Teardown done, new call already in state ${_callState.value} — not resetting to IDLE")
                     }
+                    // Notify UI to navigate back when remote ends the call or connection fails
+                    if (notifyRemote) {
+                        onCallEndedRemotely?.invoke()
+                    }
                 }
             }
         }
@@ -612,7 +648,8 @@ class WebRtcManager(
                         "sdpMid" to it.sdpMid,
                         "sdpMLineIndex" to it.sdpMLineIndex
                     )
-                    webSocketClient.sendEvent("ICE_CANDIDATE", payload)
+                    val targetPairId = _currentSession.value?.pairId ?: pendingIncomingCall?.pairId
+                    webSocketClient.sendEvent("ICE_CANDIDATE", payload, targetPairId = targetPairId)
                 }
             }
 
@@ -636,7 +673,7 @@ class WebRtcManager(
                     PeerConnection.IceConnectionState.FAILED -> {
                         Log.e(tag, "ICE connection failed")
                         _callState.value = CallState.FAILED
-                        endCallLocally()
+                        endCallLocally(notifyRemote = true)
                     }
                     else -> {}
                 }
@@ -656,10 +693,10 @@ class WebRtcManager(
                     PeerConnection.PeerConnectionState.FAILED -> {
                         Log.e(tag, "PeerConnection failed")
                         _callState.value = CallState.FAILED
-                        endCallLocally()
+                        endCallLocally(notifyRemote = true)
                     }
                     PeerConnection.PeerConnectionState.CLOSED -> {
-                        endCallLocally()
+                        endCallLocally(notifyRemote = true)
                     }
                     else -> {}
                 }

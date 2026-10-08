@@ -101,7 +101,7 @@ public class WsChatHandler extends TextWebSocketHandler {
                     String payloadJson = objectMapper.writeValueAsString(rawMap.get("payload"));
                     WsSignalingPayload payload = objectMapper.readValue(payloadJson, WsSignalingPayload.class);
                     CallType callType = "VIDEO".equalsIgnoreCase(payload.getCallType()) ? CallType.VIDEO : CallType.AUDIO;
-                    signalingService.initiateCall(pairId, deviceId, callType, payload.getSdp());
+                    signalingService.initiateCall(pairId, deviceId, payload.getCallId(), callType, payload.getSdp());
                 }
                 case CALL_ANSWER -> {
                     String payloadJson = objectMapper.writeValueAsString(rawMap.get("payload"));

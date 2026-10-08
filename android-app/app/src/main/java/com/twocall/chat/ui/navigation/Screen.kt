@@ -2,6 +2,7 @@ package com.twocall.chat.ui.navigation
 
 sealed class Screen(val route: String) {
     object Splash : Screen("splash")
+    object Home : Screen("home")
     object PairingWelcome : Screen("pairing_welcome")
     object CreatePair : Screen("create_pair")
     object EnterPairCode : Screen("enter_pair_code")

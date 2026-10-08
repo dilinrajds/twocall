@@ -35,6 +35,15 @@ public class CallSession {
     @Column(name = "ended_at")
     private Instant endedAt;
 
+    @Column(name = "offer_sdp", columnDefinition = "TEXT")
+    private String offerSdp;
+    @Column(name = "ice_candidates", columnDefinition = "TEXT")
+    private String iceCandidates;
+    public String getOfferSdp() { return offerSdp; }
+    public void setOfferSdp(String value) { offerSdp = value; }
+    public String getIceCandidates() { return iceCandidates; }
+    public void setIceCandidates(String value) { iceCandidates = value; }
+
     public CallSession() {
         this.id = UUID.randomUUID();
         this.startedAt = Instant.now();

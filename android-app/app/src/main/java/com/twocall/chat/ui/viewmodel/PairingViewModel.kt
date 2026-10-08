@@ -154,6 +154,9 @@ class PairingViewModel(
     }
 
     fun joinPair(code: String, deviceLabel: String = "Partner Phone") {
+        if (_uiState.value.isLoading || _uiState.value.isPairedSuccessfully) {
+            return
+        }
         if (!code.matches(Regex("^[0-9]{6}$"))) {
             _uiState.value = _uiState.value.copy(error = "Please enter a valid 6-digit code")
             return

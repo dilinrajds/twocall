@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Primary Betta: Flowing Upper Arc forming top of 'Z' (Electric Aqua to Deep Cyan) -->
+    <path
+        android:pathData="M34,36 C42,28 64,26 74,34 C78,37 77,43 72,45 C64,48 56,52 48,60 C42,66 38,72 35,76 C31,81 27,78 30,73 C35,65 46,55 56,48 C63,43 68,41 68,38 C68,34 50,33 40,38 C35,40 32,38 34,36 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="30"
+                android:startY="28"
+                android:endX="78"
+                android:endY="50"
+                android:type="linear">
+                <item android:color="#FF00F2FE" android:offset="0.0" />
+                <item android:color="#FF4FACFE" android:offset="0.6" />
+                <item android:color="#FF00C9FF" android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Upper Betta Flowing Veil Tail (Soft Ethereal Fin Veil) -->
+    <path
+        android:pathData="M72,33 C82,24 88,32 84,40 C80,48 74,48 68,42 C64,38 68,35 72,33 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="66"
+                android:startY="24"
+                android:endX="88"
+                android:endY="48"
+                android:type="linear">
+                <item android:color="#B300F2FE" android:offset="0.0" />
+                <item android:color="#4D7B61FF" android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Secondary Betta: Flowing Lower Arc forming base of 'Z' (Indigo to Bioluminescent Magenta) -->
+    <path
+        android:pathData="M74,72 C66,80 44,82 34,74 C30,71 31,65 36,63 C44,60 52,56 60,48 C66,42 70,36 73,32 C77,27 81,30 78,35 C73,43 62,53 52,60 C45,65 40,67 40,70 C40,74 58,75 68,70 C73,68 76,70 74,72 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="32"
+                android:startY="58"
+                android:endX="78"
+                android:endY="82"
+                android:type="linear">
+                <item android:color="#FF7B61FF" android:offset="0.0" />
+                <item android:color="#FFB33939" android:offset="0.5" />
+                <item android:color="#FFFF4B72" android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Lower Betta Veil Tail (Luminous Coral/Violet Wave) -->
+    <path
+        android:pathData="M36,75 C26,84 20,76 24,68 C28,60 34,60 40,66 C44,70 40,73 36,75 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="20"
+                android:startY="60"
+                android:endX="42"
+                android:endY="84"
+                android:type="linear">
+                <item android:color="#B3FF4B72" android:offset="0.0" />
+                <item android:color="#4D7B61FF" android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Center Convergence Light Node (The Single Private Connection Dot) -->
+    <path
+        android:pathData="M54,54m-4.5,0a4.5,4.5 0 1,0 9,0a4.5,4.5 0 1,0 -9,0"
+        android:fillColor="#FFFFFFFF" />
+    <path
+        android:pathData="M54,54m-7,0a7,7 0 1,0 14,0a7,7 0 1,0 -14,0"
+        android:strokeWidth="1.2"
+        android:strokeColor="#8000F2FE" />
+
+    <!-- Water Droplet Ripple Sparks -->
+    <path
+        android:pathData="M48,30 A1.5,1.5 0 1 1 48,33 A1.5,1.5 0 1 1 48,30"
+        android:fillColor="#8000F2FE" />
+    <path
+        android:pathData="M60,78 A1.5,1.5 0 1 1 60,81 A1.5,1.5 0 1 1 60,78"
+        android:fillColor="#80FF4B72" />
+</vector>

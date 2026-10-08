@@ -1,5 +1,6 @@
 package com.twocall.chat.ui.components
 
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -12,14 +13,13 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -32,10 +32,6 @@ import com.twocall.chat.ui.theme.*
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
-
-import androidx.compose.animation.core.*
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.scale
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -51,36 +47,41 @@ fun ChatBubble(
     val isOutgoing = message.isOutgoing
     val alignment = if (isOutgoing) Alignment.CenterEnd else Alignment.CenterStart
 
-    val bubbleColor = if (isOutgoing) OutgoingBubbleDark else IncomingBubbleDark
-    val borderColor = if (isOutgoing) OutgoingBubbleBorder else IncomingBubbleBorder
-
+    // Betta Fin-inspired organic asymmetrical curvature
     val bubbleShape = if (isOutgoing) {
-        RoundedCornerShape(22.dp, 22.dp, 4.dp, 22.dp)
+        RoundedCornerShape(24.dp, 24.dp, 6.dp, 24.dp)
     } else {
-        RoundedCornerShape(22.dp, 22.dp, 22.dp, 4.dp)
+        RoundedCornerShape(24.dp, 24.dp, 24.dp, 6.dp)
     }
 
-    // Modern Spring Entrance Scale & Alpha Animation
-    val scaleAnim = remember { Animatable(0.88f) }
+    // Gentle entrance: small fade + slight upward motion + subtle scale
+    val scaleAnim = remember { Animatable(0.92f) }
     val alphaAnim = remember { Animatable(0f) }
+    val offsetYAnim = remember { Animatable(14f) }
 
     LaunchedEffect(message.id) {
         scaleAnim.animateTo(
             targetValue = 1f,
             animationSpec = spring(
-                dampingRatio = Spring.DampingRatioMediumBouncy,
-                stiffness = Spring.StiffnessLow
+                dampingRatio = Spring.DampingRatioNoBouncy,
+                stiffness = Spring.StiffnessMediumLow
             )
         )
     }
     LaunchedEffect(message.id) {
         alphaAnim.animateTo(
             targetValue = 1f,
-            animationSpec = tween(220, easing = LinearOutSlowInEasing)
+            animationSpec = tween(240, easing = LinearOutSlowInEasing)
+        )
+    }
+    LaunchedEffect(message.id) {
+        offsetYAnim.animateTo(
+            targetValue = 0f,
+            animationSpec = tween(240, easing = FastOutSlowInEasing)
         )
     }
 
-    // Check for standalone love emoji for enlarged heart pulse animation
+    // Standalone love emoji pulse
     val isLoveEmojiOnly = remember(message.plaintext) {
         containsLoveEmoji(message.plaintext) && message.plaintext.trim().length <= 6
     }
@@ -99,7 +100,8 @@ fun ChatBubble(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .padding(horizontal = 14.dp, vertical = 4.dp)
+            .offset(y = offsetYAnim.value.dp)
             .scale(scaleAnim.value)
             .alpha(alphaAnim.value),
         contentAlignment = alignment
@@ -110,20 +112,47 @@ fun ChatBubble(
         ) {
             Box(
                 modifier = Modifier
+                    .shadow(
+                        elevation = if (isOutgoing) 8.dp else 4.dp,
+                        shape = bubbleShape,
+                        spotColor = if (isOutgoing) AquaCyan.copy(alpha = 0.35f) else NeumorphicBottomShadow
+                    )
                     .clip(bubbleShape)
-                    .background(bubbleColor)
-                    .border(1.dp, borderColor, bubbleShape)
+                    .then(
+                        if (isOutgoing) {
+                            Modifier.background(
+                                Brush.linearGradient(
+                                    listOf(Color(0xFF0077B6), Color(0xFF0096C7), Color(0xFF03045E))
+                                )
+                            )
+                        } else {
+                            Modifier.background(NeumorphicBaseDark)
+                        }
+                    )
+                    .border(
+                        width = 1.dp,
+                        brush = if (isOutgoing) {
+                            Brush.linearGradient(
+                                listOf(AquaCyan.copy(alpha = 0.6f), OceanIndigo.copy(alpha = 0.2f))
+                            )
+                        } else {
+                            Brush.linearGradient(
+                                listOf(GlassBorderDark, Color.Transparent)
+                            )
+                        },
+                        shape = bubbleShape
+                    )
                     .combinedClickable(
                         onClick = {},
                         onLongClick = onLongClick
                     )
-                    .padding(12.dp)
+                    .padding(13.dp)
             ) {
                 Column {
-                    // Reply Quote preview if replying to another message
+                    // Reply Quote preview
                     if (replyMessage != null) {
                         Surface(
-                            color = Color.Black.copy(alpha = 0.25f),
+                            color = Color.Black.copy(alpha = 0.28f),
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -134,14 +163,14 @@ fun ChatBubble(
                                     modifier = Modifier
                                         .width(3.dp)
                                         .height(30.dp)
-                                        .background(NeonCyan, RoundedCornerShape(2.dp))
+                                        .background(AquaCyan, RoundedCornerShape(2.dp))
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Column {
                                     Text(
                                         text = if (replyMessage.isOutgoing) "You" else "Partner",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = NeonCyan
+                                        color = AquaCyan
                                     )
                                     Text(
                                         text = replyMessage.plaintext.take(45),
@@ -154,20 +183,20 @@ fun ChatBubble(
                         }
                     }
 
-                    // Content Rendering based on MessageType
+                    // Content Rendering
                     if (message.isDeleted) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 imageVector = Icons.Default.Delete,
                                 contentDescription = null,
-                                tint = Color.Gray,
+                                tint = TextMutedDark,
                                 modifier = Modifier.size(16.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = "This message was deleted",
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = Color.Gray
+                                color = TextMutedDark
                             )
                         }
                     } else {
@@ -237,7 +266,7 @@ fun ChatBubble(
                         Text(
                             text = timeStr,
                             fontSize = 10.sp,
-                            color = Color.LightGray.copy(alpha = 0.8f)
+                            color = Color.LightGray.copy(alpha = 0.75f)
                         )
                         if (isOutgoing) {
                             Spacer(modifier = Modifier.width(4.dp))
@@ -247,12 +276,13 @@ fun ChatBubble(
                 }
             }
 
-            // Emoji Reaction Badge with Pop-in Animation
+            // Emoji Reaction Badge
             if (message.reactionEmoji != null) {
                 Surface(
-                    color = Color(0x661E293B),
+                    color = AquaticSurface,
                     shape = RoundedCornerShape(12.dp),
-                    shadowElevation = 4.dp,
+                    shadowElevation = 6.dp,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, AquaCyan.copy(alpha = 0.3f)),
                     modifier = Modifier.offset(y = (-10).dp, x = if (isOutgoing) (-4).dp else 4.dp)
                 ) {
                     Text(
@@ -274,20 +304,6 @@ private fun VoiceMessageBubble(message: MessageEntity, voicePlayer: VoicePlayer)
 
     val isThisPlaying = isPlaying && playingPath == message.attachmentLocalPath
 
-    val infiniteTransition = rememberInfiniteTransition(label = "voiceWave")
-    val wave1 by infiniteTransition.animateFloat(
-        initialValue = 0.3f, targetValue = 1.0f,
-        animationSpec = infiniteRepeatable(tween(350, easing = LinearEasing), RepeatMode.Reverse), label = "w1"
-    )
-    val wave2 by infiniteTransition.animateFloat(
-        initialValue = 0.8f, targetValue = 0.2f,
-        animationSpec = infiniteRepeatable(tween(420, easing = LinearEasing), RepeatMode.Reverse), label = "w2"
-    )
-    val wave3 by infiniteTransition.animateFloat(
-        initialValue = 0.4f, targetValue = 0.9f,
-        animationSpec = infiniteRepeatable(tween(380, easing = LinearEasing), RepeatMode.Reverse), label = "w3"
-    )
-
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.padding(vertical = 4.dp)
@@ -300,7 +316,7 @@ private fun VoiceMessageBubble(message: MessageEntity, voicePlayer: VoicePlayer)
             },
             modifier = Modifier
                 .size(38.dp)
-                .background(Brush.linearGradient(listOf(NeonCyan, NeonIndigo)), CircleShape)
+                .background(Brush.linearGradient(listOf(AquaCyan, BettaViolet)), CircleShape)
         ) {
             Icon(
                 imageVector = if (isThisPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
@@ -315,35 +331,24 @@ private fun VoiceMessageBubble(message: MessageEntity, voicePlayer: VoicePlayer)
             LinearProgressIndicator(
                 progress = { if (isThisPlaying) progress else 0f },
                 modifier = Modifier
-                    .width(120.dp)
+                    .width(130.dp)
                     .height(6.dp)
                     .clip(RoundedCornerShape(3.dp)),
-                color = NeonCyan,
-                trackColor = Color.White.copy(alpha = 0.25f)
+                color = AquaCyan,
+                trackColor = Color.White.copy(alpha = 0.2f)
             )
 
-            if (isThisPlaying) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(3.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    listOf(wave1, wave2, wave3, wave1).forEach { w ->
-                        Box(
-                            modifier = Modifier
-                                .width(3.dp)
-                                .height((12 * w).dp)
-                                .background(NeonCyan, RoundedCornerShape(1.dp))
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "Playing...",
-                        fontSize = 9.sp,
-                        color = NeonCyan
-                    )
-                }
-            }
+            Spacer(modifier = Modifier.height(6.dp))
+
+            ZippyWaveform(
+                modifier = Modifier.width(130.dp),
+                height = 16.dp,
+                barCount = 18,
+                isRecording = isThisPlaying,
+                amplitude = if (isThisPlaying) 0.8f else 0.2f,
+                primaryColor = AquaCyan,
+                secondaryColor = BettaViolet
+            )
         }
     }
 }

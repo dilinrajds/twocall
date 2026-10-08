@@ -39,10 +39,27 @@ class WebSocketClient(
     private var shouldReconnect = true
     private var retryDelayMs = 2000L
     private var lastRawWsUrl: String? = null
+    private var connectedPairId: String? = null
+
+    fun connectForPair(wsUrl: String, pairId: String) {
+        if (connectedPairId != pairId) disconnect()
+        keyStoreManager.setActivePairId(pairId)
+        connect(wsUrl)
+    }
 
     var onTokenRefreshRequired: (suspend () -> Boolean)? = null
 
+    private var connectionWatchdogJob: Job? = null
+
+    @Synchronized
     fun connect(wsUrl: String) {
+        if (_connectionState.value == WsConnectionState.CONNECTED ||
+            _connectionState.value == WsConnectionState.CONNECTING) {
+            Log.d(tag, "WebSocket already connected or connecting, skipping connect()")
+            return
+        }
+        reconnectJob?.cancel()
+        connectionWatchdogJob?.cancel()
         shouldReconnect = true
 
         // Clean base URL by stripping existing query parameters
@@ -55,24 +72,42 @@ class WebSocketClient(
         }
 
         val urlWithAuth = "$cleanBaseUrl?token=$token"
+        connectedPairId = keyStoreManager.getActivePairId()
         val request = Request.Builder().url(urlWithAuth).build()
 
-        // Close any stale socket before creating a new one
+        // Cancel any stale socket before creating a new one
         try {
-            webSocket?.close(1000, "Reconnecting")
+            webSocket?.cancel()
         } catch (ignored: Exception) {}
+        webSocket = null
 
         _connectionState.value = WsConnectionState.CONNECTING
         Log.i(tag, "Connecting WebSocket to $cleanBaseUrl...")
 
+        // Watchdog: If connection doesn't succeed within 12 seconds, retry
+        connectionWatchdogJob = scope.launch {
+            delay(12000L)
+            if (_connectionState.value == WsConnectionState.CONNECTING) {
+                Log.w(tag, "WebSocket connection attempt timed out after 12s, scheduling reconnect...")
+                try {
+                    webSocket?.cancel()
+                } catch (ignored: Exception) {}
+                webSocket = null
+                _connectionState.value = WsConnectionState.DISCONNECTED
+                scheduleReconnect(cleanBaseUrl)
+            }
+        }
+
         webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(ws: WebSocket, response: Response) {
+                connectionWatchdogJob?.cancel()
                 Log.i(tag, "WebSocket connected successfully!")
                 _connectionState.value = WsConnectionState.CONNECTED
                 retryDelayMs = 2000L // Reset backoff
             }
 
             override fun onMessage(ws: WebSocket, text: String) {
+                Log.i(tag, "Received WebSocket message: $text")
                 try {
                     @Suppress("UNCHECKED_CAST")
                     val event = gson.fromJson(text, WsEventDto::class.java) as WsEventDto<Any>
@@ -85,19 +120,39 @@ class WebSocketClient(
             }
 
             override fun onClosing(ws: WebSocket, code: Int, reason: String) {
+                connectionWatchdogJob?.cancel()
                 ws.close(1000, null)
+                webSocket = null
                 _connectionState.value = WsConnectionState.DISCONNECTED
             }
 
             override fun onClosed(ws: WebSocket, code: Int, reason: String) {
-                _connectionState.value = WsConnectionState.DISCONNECTED
-                scheduleReconnect(cleanBaseUrl)
+                connectionWatchdogJob?.cancel()
+                if (webSocket == ws) {
+                    webSocket = null
+                    _connectionState.value = WsConnectionState.DISCONNECTED
+                }
+                if (reason != "Reconnecting" && reason != "Normal closure" && shouldReconnect) {
+                    scheduleReconnect(cleanBaseUrl)
+                }
             }
 
             override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
+                connectionWatchdogJob?.cancel()
+                val msg = t.message ?: ""
                 val statusCode = response?.code ?: 0
-                Log.w(tag, "WebSocket failure (HTTP $statusCode): ${t.message}")
-                _connectionState.value = WsConnectionState.DISCONNECTED
+                Log.w(tag, "WebSocket failure (HTTP $statusCode): $msg")
+
+                // If this failure was caused by our own intentional cancellation of a stale socket, ignore it!
+                if (msg.contains("Canceled", ignoreCase = true) || msg.contains("Socket closed", ignoreCase = true)) {
+                    Log.d(tag, "Ignoring intentional cancellation failure")
+                    return
+                }
+
+                if (webSocket == ws) {
+                    webSocket = null
+                    _connectionState.value = WsConnectionState.DISCONNECTED
+                }
 
                 if (statusCode == 401 || statusCode == 403) {
                     Log.i(tag, "WebSocket auth failed (HTTP $statusCode). Attempting token refresh...")
@@ -110,7 +165,7 @@ class WebSocketClient(
                             scheduleReconnect(cleanBaseUrl)
                         }
                     }
-                } else {
+                } else if (shouldReconnect) {
                     scheduleReconnect(cleanBaseUrl)
                 }
             }
@@ -124,25 +179,57 @@ class WebSocketClient(
             delay(retryDelayMs)
             retryDelayMs = (retryDelayMs * 2).coerceAtMost(30000L) // Exponential backoff up to 30s
             Log.i(tag, "Attempting WebSocket reconnect in ${retryDelayMs / 1000}s...")
+            _connectionState.value = WsConnectionState.DISCONNECTED
+            webSocket = null
             connect(wsUrl)
         }
     }
 
-    fun <T> sendEvent(eventType: String, payload: T): Boolean {
-        val pairId = keyStoreManager.getPairId() ?: return false
-        val deviceId = keyStoreManager.getDeviceId() ?: return false
+    fun reconnectNow() {
+        if (_connectionState.value == WsConnectionState.CONNECTED ||
+            _connectionState.value == WsConnectionState.CONNECTING) {
+            Log.d(tag, "reconnectNow: already connected or connecting, skipping")
+            return
+        }
+        shouldReconnect = true
+        retryDelayMs = 2000L
+        reconnectJob?.cancel()
+        try {
+            webSocket?.cancel()
+        } catch (ignored: Exception) {}
+        webSocket = null
+        _connectionState.value = WsConnectionState.DISCONNECTED
+        lastRawWsUrl?.let { connect(it) }
+    }
+
+    fun <T> sendEvent(eventType: String, payload: T, targetPairId: String? = null): Boolean {
+        val pairId = targetPairId ?: keyStoreManager.getPairId() ?: run {
+            Log.w(tag, "sendEvent: pairId is null")
+            return false
+        }
+        val deviceId = keyStoreManager.getDeviceId(pairId) ?: keyStoreManager.getDeviceId() ?: run {
+            Log.w(tag, "sendEvent: deviceId is null")
+            return false
+        }
 
         val event = WsEventDto(
             eventType = eventType,
             pairId = pairId,
             senderDeviceId = deviceId,
-            recipientDeviceId = keyStoreManager.getPartnerDeviceId(),
+            recipientDeviceId = keyStoreManager.getPartnerDeviceId(pairId),
             timestamp = java.time.Instant.now().toString(),
             payload = payload
         )
 
         val json = gson.toJson(event)
-        return webSocket?.send(json) ?: false
+        val ws = webSocket
+        val success = ws?.send(json) ?: false
+        Log.i(tag, "sendEvent: $eventType, sent=$success, wsConnected=${_connectionState.value == WsConnectionState.CONNECTED}")
+        if (!success) {
+            Log.w(tag, "sendEvent: failed to send $eventType! Triggering reconnectNow()...")
+            reconnectNow()
+        }
+        return success
     }
 
     fun disconnect() {

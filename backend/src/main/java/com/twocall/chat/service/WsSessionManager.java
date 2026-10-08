@@ -97,6 +97,13 @@ public class WsSessionManager {
                 session.close();
             } catch (IOException ignored) {}
         }
+        // Clean up pairDevices map to prevent phantom partner entries
+        pairDevices.forEach((pairId, devices) -> {
+            devices.remove(deviceId);
+            if (devices.isEmpty()) {
+                pairDevices.remove(pairId);
+            }
+        });
     }
 }
 

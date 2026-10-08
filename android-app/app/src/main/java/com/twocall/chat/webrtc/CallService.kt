@@ -29,10 +29,7 @@ class CallService : Service() {
         }
 
         fun stopCallService(context: Context) {
-            val intent = Intent(context, CallService::class.java).apply {
-                action = ACTION_END_CALL
-            }
-            context.startService(intent)
+            context.stopService(Intent(context, CallService::class.java))
         }
     }
 
@@ -50,7 +47,20 @@ class CallService : Service() {
 
         val isVideo = intent?.getBooleanExtra("isVideo", false) ?: false
         val notification = buildCallNotification(isVideo)
-        startForeground(NOTIFICATION_ID, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val type = if (isVideo) {
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+                } else {
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                }
+                startForeground(NOTIFICATION_ID, notification, type)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("CallService", "Failed to startForeground: ${e.message}")
+        }
 
         return START_STICKY
     }
@@ -65,9 +75,9 @@ class CallService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_phone_call)
-            .setContentTitle(if (isVideo) "Private Video Call in Progress" else "Private Audio Call in Progress")
-            .setContentText("Connected with your partner")
+            .setSmallIcon(com.twocall.chat.R.drawable.ic_notification)
+            .setContentTitle(if (isVideo) "ZippyCall • Video Call in Progress" else "ZippyCall • Audio Call in Progress")
+            .setContentText("Connected in private sanctuary")
             .setOngoing(true)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setPriority(NotificationCompat.PRIORITY_HIGH)

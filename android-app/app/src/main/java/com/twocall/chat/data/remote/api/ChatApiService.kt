@@ -30,10 +30,10 @@ interface ChatApiService {
     suspend fun sendMessage(@Body request: SendMessageRequestDto): Response<MessageResponseDto>
 
     @GET("api/v1/messages/sync")
-    suspend fun syncMessages(@Query("after") after: String?): Response<List<MessageResponseDto>>
+    suspend fun syncMessages(@Query("after") after: String?, @Header("X-Pair-Id") pairId: String? = null): Response<List<MessageResponseDto>>
 
     @POST("api/v1/messages/receipt")
-    suspend fun updateReceipt(@Body request: ReceiptUpdateRequestDto): Response<Map<String, String>>
+    suspend fun updateReceipt(@Body request: ReceiptUpdateRequestDto, @Header("X-Pair-Id") pairId: String? = null): Response<Map<String, String>>
 
     @POST("api/v1/messages/reaction")
     suspend fun sendReaction(@Body request: ReactionRequestDto): Response<Map<String, String>>
@@ -50,11 +50,23 @@ interface ChatApiService {
 
     @Streaming
     @GET("api/v1/media/{attachmentId}")
-    suspend fun downloadMedia(@Path("attachmentId") attachmentId: String): Response<ResponseBody>
+    suspend fun downloadMedia(@Path("attachmentId") attachmentId: String, @Header("X-Pair-Id") pairId: String? = null): Response<ResponseBody>
 
     @GET("api/v1/webrtc/turn-credentials")
     suspend fun getTurnCredentials(): Response<TurnCredentialsResponseDto>
 
     @POST("api/v1/device/push-token")
-    suspend fun registerPushToken(@Body request: RegisterPushTokenRequestDto): Response<Map<String, String>>
+    suspend fun registerPushToken(@Body request: RegisterPushTokenRequestDto, @Header("X-Pair-Id") pairId: String? = null): Response<Map<String, String>>
+
+    @GET("api/v1/device/profile")
+    suspend fun getProfiles(@Header("X-Pair-Id") pairId: String): Response<ProfilesDto>
+
+    @PUT("api/v1/device/profile")
+    suspend fun updateProfile(@Body profile: ProfileDto, @Header("X-Pair-Id") pairId: String): Response<Map<String, String>>
+
+    @GET("api/v1/webrtc/calls/{callId}/incoming")
+    suspend fun recoverIncomingCall(@Path("callId") callId: String, @Header("X-Pair-Id") pairId: String): Response<IncomingCallDto>
+
+    @POST("api/v1/webrtc/calls/{callId}/reject")
+    suspend fun rejectCall(@Path("callId") callId: String, @Header("X-Pair-Id") pairId: String): Response<Map<String, String>>
 }

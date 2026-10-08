@@ -1,30 +1,30 @@
 package com.twocall.chat.ui.screens
 
+import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.DeleteForever
-import androidx.compose.material.icons.filled.ExitToApp
-import androidx.compose.material.icons.filled.Key
-import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.twocall.chat.ChatApplication
-import com.twocall.chat.ui.components.AnimatedGlassBackground
-import com.twocall.chat.ui.components.GlassButton
-import com.twocall.chat.ui.components.GlassCard
+import com.twocall.chat.ui.components.*
 import com.twocall.chat.ui.theme.*
 import com.twocall.chat.ui.viewmodel.ChatViewModel
 import kotlinx.coroutines.launch
@@ -38,17 +38,31 @@ fun SettingsScreen(
     onDisconnected: () -> Unit
 ) {
     val coroutineScope = rememberCoroutineScope()
+    val scrollState = rememberScrollState()
+    val view = LocalView.current
+
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     var showDisconnectConfirmDialog by remember { mutableStateOf(false) }
 
-    AnimatedGlassBackground {
+    ZippyAquaticBackground {
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text("Privacy & Security Settings", color = Color.White, fontWeight = FontWeight.Bold) },
+                    title = {
+                        Text(
+                            text = "Settings & Privacy",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp
+                        )
+                    },
                     navigationIcon = {
                         IconButton(onClick = onBackClick) {
-                            Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = Color.White
+                            )
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
@@ -60,128 +74,299 @@ fun SettingsScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
+                    .verticalScroll(scrollState)
                     .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(20.dp)
+                verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
-                // E2EE Safety Fingerprint Card
-                GlassCard(
+                ProfileEditor(app)
+
+                NotificationSettings(app)
+
+                // Section 1: End-to-End Encryption & Security Fingerprints
+                ZippyNeumorphicCard(
                     modifier = Modifier.fillMaxWidth(),
-                    borderColor = NeonCyan.copy(alpha = 0.35f)
+                    shape = RoundedCornerShape(24.dp),
+                    backgroundColor = NeumorphicBaseDark,
+                    borderStroke = 1.2.dp,
+                    highlightColor = AquaCyan.copy(alpha = 0.35f)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(NeonCyan.copy(alpha = 0.2f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(imageVector = Icons.Default.Security, contentDescription = null, tint = NeonCyan)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(20.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(Brush.linearGradient(listOf(AquaCyan, OceanIndigo))),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Security,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Private Sanctuary Encryption",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp
+                                )
+                                Text(
+                                    text = "NIST P-256 ECDH & AES-256-GCM",
+                                    color = AquaCyan,
+                                    fontSize = 11.sp
+                                )
+                            }
                         }
-                        Spacer(modifier = Modifier.width(12.dp))
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
                         Text(
-                            text = "End-to-End Encryption",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = Color.White,
+                            text = "All messages, photos, and calls are encrypted on-device. Plaintext never traverses servers.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondaryDark,
+                            lineHeight = 18.sp
+                        )
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Text(
+                            text = "Partner Identity Fingerprint",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AquaCyan,
                             fontWeight = FontWeight.Bold
                         )
+                        Surface(
+                            color = AquaticSurface,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp, bottom = 12.dp)
+                        ) {
+                            Text(
+                                text = viewModel.getSafetyFingerprint(),
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                color = Color.White,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
+
+                        Text(
+                            text = "Your Identity Fingerprint",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AquaCyan,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Surface(
+                            color = AquaticSurface,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp)
+                        ) {
+                            Text(
+                                text = viewModel.getMyFingerprint(),
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                color = Color.White,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
                     }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Text(
-                        text = "Messages and calls are encrypted on-device using NIST P-256 ECDH and AES-256-GCM. Plaintext never leaves your phone.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = DarkOnSurfaceVariant
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Text(
-                        text = "Partner Identity Fingerprint:",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = NeonCyan,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = viewModel.getSafetyFingerprint(),
-                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                        color = Color.White,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp, bottom = 12.dp)
-                    )
-
-                    Text(
-                        text = "Your Identity Fingerprint:",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = NeonCyan,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = viewModel.getMyFingerprint(),
-                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                        color = Color.White,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp)
-                    )
                 }
 
-                // Session & Pair Danger Zone Controls
-                GlassCard(
+                // Section 2: Call Quality & Video Engine
+                ZippyNeumorphicCard(
                     modifier = Modifier.fillMaxWidth(),
-                    borderColor = Color.White.copy(alpha = 0.2f)
+                    shape = RoundedCornerShape(24.dp),
+                    backgroundColor = NeumorphicBaseDark,
+                    borderStroke = 1.dp
                 ) {
-                    ListItem(
-                        headlineContent = { Text("Disconnect Device", color = Color.White, fontWeight = FontWeight.SemiBold) },
-                        supportingContent = { Text("Log out and revoke device session", color = DarkOnSurfaceVariant) },
-                        leadingContent = { Icon(imageVector = Icons.Default.ExitToApp, contentDescription = null, tint = NeonCyan) },
-                        colors = ListItemDefaults.colors(containerColor = Color.Transparent)
-                    )
-                    GlassButton(
-                        onClick = { showDisconnectConfirmDialog = true },
-                        gradientColors = listOf(Color(0x33FFFFFF), Color(0x1AFFFFFF)),
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .padding(20.dp)
                     ) {
-                        Text("Disconnect", color = Color.White)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(Brush.linearGradient(listOf(BettaViolet, BiolumPink))),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Videocam,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Calling Engine",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp
+                                )
+                                Text(
+                                    text = "Full HD (1080p @ 30fps) Enabled",
+                                    color = LuminousTeal,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Video Resolution",
+                                color = TextSecondaryDark,
+                                fontSize = 13.sp
+                            )
+                            Text(
+                                text = "1920×1080 Full HD",
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Bandwidth Allocation",
+                                color = TextSecondaryDark,
+                                fontSize = 13.sp
+                            )
+                            Text(
+                                text = "Adaptive up to 4.0 Mbps",
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp
+                            )
+                        }
                     }
+                }
 
-                    Spacer(modifier = Modifier.height(16.dp))
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    ListItem(
-                        headlineContent = { Text("Permanently Delete Pair", color = DarkError, fontWeight = FontWeight.Bold) },
-                        supportingContent = { Text("Destroys pair credentials, chat history, and files from both phones", color = DarkOnSurfaceVariant) },
-                        leadingContent = { Icon(imageVector = Icons.Default.DeleteForever, contentDescription = null, tint = DarkError) },
-                        colors = ListItemDefaults.colors(containerColor = Color.Transparent)
-                    )
-                    GlassButton(
-                        onClick = { showDeleteConfirmDialog = true },
-                        gradientColors = listOf(DarkError, Color(0xFFB91C1C)),
+                // Section 3: About ZippyCall
+                ZippyNeumorphicCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(24.dp),
+                    backgroundColor = NeumorphicBaseDark,
+                    borderStroke = 1.dp
+                ) {
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .padding(20.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Delete Pair & All Data", color = Color.White, fontWeight = FontWeight.Bold)
+                        ZippyBettaFish(
+                            modifier = Modifier.size(54.dp),
+                            primaryColor = AquaCyan,
+                            secondaryColor = BettaViolet
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column {
+                            Text(
+                                text = "ZippyCall",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp
+                            )
+                            Text(
+                                text = "Version 2.0 • Sanctuary for Two",
+                                color = TextSecondaryDark,
+                                fontSize = 12.sp
+                            )
+                            Text(
+                                text = "Private. Just for two.",
+                                color = AquaCyan,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+
+                // Section 4: Device & Connection Controls (Disconnect & Terminate)
+                ZippyNeumorphicCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(24.dp),
+                    backgroundColor = NeumorphicBaseDark,
+                    borderStroke = 1.dp,
+                    highlightColor = AquaticDecline.copy(alpha = 0.25f)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = "Connection Controls",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp
+                        )
+
+                        // Disconnect Device
+                        ZippyNeumorphicButton(
+                            onClick = { showDisconnectConfirmDialog = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            text = "Disconnect Device",
+                            icon = Icons.Default.ExitToApp,
+                            gradient = Brush.linearGradient(listOf(Color(0xFF263248), Color(0xFF1A233A)))
+                        )
+
+                        // Permanently Delete Pair
+                        ZippyNeumorphicButton(
+                            onClick = { showDeleteConfirmDialog = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            text = "Permanently Delete Pair",
+                            icon = Icons.Default.DeleteForever,
+                            gradient = Brush.linearGradient(listOf(AquaticDecline, Color(0xFF8B0000)))
+                        )
                     }
                 }
             }
         }
     }
 
+    // Disconnect Confirmation Dialog
     if (showDisconnectConfirmDialog) {
         AlertDialog(
             onDismissRequest = { showDisconnectConfirmDialog = false },
-            containerColor = DarkSurface,
+            containerColor = NeumorphicBaseDark,
             title = { Text("Disconnect Device?", color = Color.White) },
-            text = { Text("You will be logged out of this private pair. Re-pairing will be required.", color = DarkOnSurfaceVariant) },
+            text = {
+                Text(
+                    "You will be disconnected from the private channel. You can re-enter with your partner code.",
+                    color = TextSecondaryDark
+                )
+            },
             confirmButton = {
                 TextButton(
                     onClick = {
+                        view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
                         showDisconnectConfirmDialog = false
                         coroutineScope.launch {
                             app.disconnectDevice()
@@ -189,26 +374,33 @@ fun SettingsScreen(
                         }
                     }
                 ) {
-                    Text("Disconnect", color = NeonCyan)
+                    Text("Disconnect", color = AquaCyan, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showDisconnectConfirmDialog = false }) {
-                    Text("Cancel", color = Color.Gray)
+                    Text("Cancel", color = TextSecondaryDark)
                 }
             }
         )
     }
 
+    // Permanently Delete Confirmation Dialog
     if (showDeleteConfirmDialog) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirmDialog = false },
-            containerColor = DarkSurface,
-            title = { Text("Permanently Delete Pair?", color = Color.White) },
-            text = { Text("This permanently deletes the private pair, encrypted messages, and media. Action cannot be undone.", color = DarkOnSurfaceVariant) },
+            containerColor = NeumorphicBaseDark,
+            title = { Text("Permanently Delete Pair?", color = AquaticDecline, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "This action cannot be undone. All messages, files, and encryption keys will be permanently destroyed on both devices.",
+                    color = TextSecondaryDark
+                )
+            },
             confirmButton = {
                 TextButton(
                     onClick = {
+                        view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
                         showDeleteConfirmDialog = false
                         coroutineScope.launch {
                             app.deletePairPermanently()
@@ -216,12 +408,12 @@ fun SettingsScreen(
                         }
                     }
                 ) {
-                    Text("Delete Forever", color = DarkError, fontWeight = FontWeight.Bold)
+                    Text("Delete Everything", color = AquaticDecline, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteConfirmDialog = false }) {
-                    Text("Cancel", color = Color.Gray)
+                    Text("Cancel", color = TextSecondaryDark)
                 }
             }
         )

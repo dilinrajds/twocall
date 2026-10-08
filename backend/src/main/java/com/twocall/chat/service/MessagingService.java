@@ -117,10 +117,17 @@ public class MessagingService {
                         senderDeviceId,
                         Map.of("messageId", message.getId().toString(), "status", "DELIVERED")
                 ));
-            } else {
-                // Partner offline -> trigger privacy-preserving FCM push notification
-                pushNotificationService.sendNewMessageNotification(partnerDeviceId, message.getId());
             }
+
+            // Always trigger privacy-preserving FCM push notification to wake up device
+            // and show notification in system bar if backgrounded or app is closed
+            pushNotificationService.sendNewMessageNotification(
+                    partnerDeviceId,
+                    pairId,
+                    message.getId(),
+                    senderDeviceId,
+                    senderDevice.getDeviceLabel()
+            );
         }
 
         return responseDto;
@@ -138,7 +145,6 @@ public class MessagingService {
                 .orElse(new DeliveryReceipt(UUID.randomUUID(), message, device, req.getStatus()));
 
         receipt.setStatus(req.getStatus());
-        receipt.setUpdatedAt(Instant.now());
         receiptRepository.save(receipt);
 
         if ("READ".equalsIgnoreCase(req.getStatus())) {
@@ -191,6 +197,11 @@ public class MessagingService {
     public void deleteMessage(UUID pairId, UUID deviceId, UUID messageId) {
         Message message = messageRepository.findByIdAndPairId(messageId, pairId)
                 .orElseThrow(() -> new ResourceNotFoundException("Message not found"));
+
+        // Only the sender can delete their own message
+        if (!message.getSenderDevice().getId().equals(deviceId)) {
+            throw new com.twocall.chat.exception.UnauthorizedPairAccessException("Only the sender can delete this message");
+        }
 
         message.setDeleted(true);
         message.setCiphertextPayload(""); // Clear encrypted payload on deletion

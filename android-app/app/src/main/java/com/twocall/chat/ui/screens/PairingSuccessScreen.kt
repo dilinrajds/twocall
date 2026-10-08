@@ -1,120 +1,134 @@
 package com.twocall.chat.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.twocall.chat.ui.theme.DarkBackground
-import com.twocall.chat.ui.theme.DarkPrimary
+import androidx.compose.ui.unit.sp
+import com.twocall.chat.ui.components.*
+import com.twocall.chat.ui.theme.*
 
 @Composable
 fun PairingSuccessScreen(
     onOpenConversation: () -> Unit
 ) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(DarkBackground)
-            .padding(24.dp),
-        contentAlignment = Alignment.Center
-    ) {
+    ZippyAquaticBackground {
         Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp)
+                .padding(vertical = 32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceBetween,
-            modifier = Modifier.fillMaxSize().padding(vertical = 40.dp)
+            verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Spacer(modifier = Modifier.height(40.dp))
-
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(top = 24.dp)
+            ) {
+                // Two Betta Fish in harmonious union
                 Box(
                     modifier = Modifier
-                        .size(96.dp)
-                        .background(DarkPrimary.copy(alpha = 0.2f), CircleShape),
+                        .size(170.dp)
+                        .clip(CircleShape)
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(AquaCyan.copy(alpha = 0.25f), Color.Transparent)
+                            )
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(72.dp)
-                            .background(DarkPrimary, CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = "Success",
-                            tint = Color.White,
-                            modifier = Modifier.size(44.dp)
-                        )
-                    }
+                    ZippyConcentricRipples(
+                        modifier = Modifier.fillMaxSize(),
+                        baseColor = LuminousTeal,
+                        rippleCount = 3,
+                        maxRadius = 80.dp
+                    )
+                    ZippyTwinBettaEncounter(
+                        modifier = Modifier.size(160.dp),
+                        progress = 1.0f
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(28.dp))
 
-                Text(
-                    text = "Paired Successfully!",
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = MaterialTheme.colorScheme.onBackground
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "Connected ",
+                        style = MaterialTheme.typography.headlineMedium.copy(
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 30.sp
+                        ),
+                        color = Color.White
+                    )
+                    Icon(
+                        imageVector = Icons.Default.Favorite,
+                        contentDescription = "Heart",
+                        tint = BiolumPink,
+                        modifier = Modifier.size(30.dp)
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = "Your private end-to-end encrypted channel is active.\nThe one-time pairing code has been destroyed.",
-                    style = MaterialTheme.typography.bodyMedium,
+                    text = "Your private sanctuary is open.\nZero central storage • Hardware-bound AES-256",
+                    style = MaterialTheme.typography.bodySmall,
                     textAlign = TextAlign.Center,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 20.dp)
+                    color = TextSecondaryDark,
+                    lineHeight = 18.sp,
+                    modifier = Modifier.padding(horizontal = 24.dp)
                 )
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(28.dp))
 
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = RoundedCornerShape(12.dp)
+                ZippyNeumorphicCard(
+                    modifier = Modifier.padding(horizontal = 24.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    backgroundColor = AquaticSurface.copy(alpha = 0.6f)
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Security,
+                            imageVector = Icons.Default.Shield,
                             contentDescription = null,
-                            tint = DarkPrimary,
+                            tint = LuminousTeal,
                             modifier = Modifier.size(18.dp)
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            text = "Hardware Keystore Bound",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurface
+                            text = "End-to-End Encrypted Forever",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
                         )
                     }
                 }
             }
 
-            Button(
+            ZippyNeumorphicButton(
                 onClick = onOpenConversation,
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = DarkPrimary),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-            ) {
-                Text(
-                    text = "Open Conversation",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Color.White
-                )
-            }
+                modifier = Modifier.fillMaxWidth(),
+                text = "Enter Private Sanctuary",
+                icon = Icons.AutoMirrored.Filled.ArrowForward,
+                gradient = BettaFlowGradient
+            )
         }
     }
 }

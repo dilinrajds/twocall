@@ -5,8 +5,10 @@ import android.util.Log
 import com.google.gson.Gson
 import com.twocall.chat.crypto.CryptoEngine
 import com.twocall.chat.crypto.KeyStoreManager
+import com.twocall.chat.data.local.dao.CallLogDao
 import com.twocall.chat.data.local.dao.ConversationDao
 import com.twocall.chat.data.local.dao.MessageDao
+import com.twocall.chat.data.local.entity.CallLogEntity
 import com.twocall.chat.data.local.entity.ConversationEntity
 import com.twocall.chat.data.local.entity.MessageEntity
 import com.twocall.chat.data.remote.api.ChatApiService
@@ -14,6 +16,7 @@ import com.twocall.chat.data.remote.dto.*
 import com.twocall.chat.data.remote.ws.WebSocketClient
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
@@ -26,6 +29,7 @@ class ChatRepository(
     private val context: Context,
     private val messageDao: MessageDao,
     private val conversationDao: ConversationDao,
+    private val callLogDao: CallLogDao,
     private val apiService: ChatApiService,
     private val webSocketClient: WebSocketClient,
     private val keyStoreManager: KeyStoreManager,
@@ -35,13 +39,72 @@ class ChatRepository(
     private val tag = "ChatRepository"
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    val allMessagesFlow: Flow<List<MessageEntity>> = messageDao.getAllMessagesFlow()
-    val conversationFlow: Flow<ConversationEntity?> = conversationDao.getConversationFlow()
+    // ── Flows ────────────────────────────────────────────────────────────────
+
+    /** All conversations for home screen */
+    val allConversationsFlow = conversationDao.getAllConversationsFlow()
+
+    /** Messages for the ACTIVE pair */
+    val allMessagesFlow: Flow<List<MessageEntity>>
+        get() {
+            val pairId = keyStoreManager.getActivePairId() ?: ""
+            return if (pairId.isNotBlank()) messageDao.getMessagesFlowForPair(pairId)
+            else messageDao.getAllMessagesFlow()
+        }
+
+    /** Conversation for the ACTIVE pair */
+    val conversationFlow: Flow<ConversationEntity?>
+        get() {
+            val pairId = keyStoreManager.getActivePairId() ?: ""
+            return if (pairId.isNotBlank()) conversationDao.getConversationFlowByPairId(pairId)
+            else conversationDao.getConversationFlow()
+        }
 
     var onPairTerminated: (() -> Unit)? = null
 
-    private val _loveAnimationEvents = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 16)
+    private val _loveAnimationEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 16)
     val loveAnimationEvents = _loveAnimationEvents.asSharedFlow()
+
+    // ── Scoped per-pair helpers ──────────────────────────────────────────────
+
+    fun getMessagesFlowForPair(pairId: String): Flow<List<MessageEntity>> =
+        messageDao.getMessagesFlowForPair(pairId)
+
+    fun getConversationFlowForPair(pairId: String): Flow<ConversationEntity?> =
+        conversationDao.getConversationFlowByPairId(pairId)
+
+    fun getCallLogsFlowForPair(pairId: String): Flow<List<CallLogEntity>> =
+        callLogDao.getCallLogsForPair(pairId)
+
+    suspend fun clearUnread(pairId: String) {
+        conversationDao.clearUnread(pairId)
+    }
+
+    suspend fun syncProfile(pairId: String) {
+        val response = apiService.getProfiles(pairId)
+        if (!response.isSuccessful) return
+        val profiles = response.body() ?: return
+        val localName = keyStoreManager.getMyProfileName()
+        if (localName.isNotBlank() && (profiles.mine.name != localName ||
+                profiles.mine.imageBase64.orEmpty() != keyStoreManager.getMyProfileImage().orEmpty())) {
+            apiService.updateProfile(ProfileDto(localName, keyStoreManager.getMyProfileImage()), pairId)
+        }
+        conversationDao.updateProfile(pairId, profiles.partner.name, profiles.partner.imageBase64)
+    }
+
+    suspend fun updateMyProfile(name: String, image: String?): Boolean {
+        require(name.isNotBlank() && name.trim().length <= 64)
+        keyStoreManager.saveMyProfile(name.trim(), image)
+        var success = true
+        for (pairId in keyStoreManager.getAllPairIds()) {
+            try {
+                if (!apiService.updateProfile(ProfileDto(name.trim(), image), pairId).isSuccessful) success = false
+            } catch (e: Exception) { success = false }
+        }
+        return success
+    }
+
+    // ── Initialization ───────────────────────────────────────────────────────
 
     init {
         // Observe WebSocket incoming events
@@ -50,159 +113,48 @@ class ChatRepository(
                 handleIncomingWsEvent(event)
             }
         }
-    }
 
-    suspend fun sendTextMessage(text: String, replyToMessageId: String? = null) {
-        val pairId = keyStoreManager.getPairId() ?: return
-        val myDeviceId = keyStoreManager.getDeviceId() ?: return
-        val aesKey = keyStoreManager.getSharedSessionAesKey() ?: run {
-            Log.e(tag, "Cannot encrypt message: Shared AES key is null (partner not paired yet)")
-            return
-        }
-
-        // 1. E2EE Encrypt
-        val encrypted = CryptoEngine.encrypt(text, aesKey)
-        val clientMsgId = UUID.randomUUID().toString()
-        val tempId = UUID.randomUUID().toString()
-        val now = System.currentTimeMillis()
-
-        // 2. Persist locally as PENDING immediately (optimistic UI)
-        val localMessage = MessageEntity(
-            id = tempId,
-            pairId = pairId,
-            senderDeviceId = myDeviceId,
-            clientMessageId = clientMsgId,
-            plaintext = text,
-            ciphertext = encrypted.ciphertext,
-            iv = encrypted.iv,
-            messageType = "TEXT",
-            replyToMessageId = replyToMessageId,
-            status = "PENDING",
-            isOutgoing = true,
-            timestamp = now
-        )
-        messageDao.insertOrUpdate(localMessage)
-
-        // 3. Send to backend via REST
-        try {
-            val req = SendMessageRequestDto(
-                clientMessageId = clientMsgId,
-                ciphertextPayload = encrypted.ciphertext,
-                iv = encrypted.iv,
-                ephemeralPublicKey = null,
-                messageType = "TEXT",
-                replyToMessageId = replyToMessageId,
-                mediaAttachmentId = null
-            )
-            val response = apiService.sendMessage(req)
-            if (response.isSuccessful && response.body() != null) {
-                val serverMsg = response.body()!!
-                messageDao.deleteById(tempId)
-                messageDao.insertOrUpdate(
-                    localMessage.copy(
-                        id = serverMsg.id,
-                        status = serverMsg.status
-                    )
-                )
-            } else {
-                Log.w(tag, "Message send returned error code ${response.code()}")
-            }
-        } catch (e: Exception) {
-            Log.w(tag, "Failed to send message over network, will retry offline queue: ${e.message}")
-        }
-    }
-
-    suspend fun sendMediaMessage(file: File, contentType: String, messageType: String, replyToMessageId: String? = null) {
-        val pairId = keyStoreManager.getPairId() ?: return
-        val myDeviceId = keyStoreManager.getDeviceId() ?: return
-        val aesKey = keyStoreManager.getSharedSessionAesKey() ?: return
-
-        val requestFile = file.asRequestBody(contentType.toMediaTypeOrNull())
-        val body = MultipartBody.Part.createFormData("file", file.name, requestFile)
-
-        val uploadRes = apiService.uploadMedia(body, null)
-        if (!uploadRes.isSuccessful || uploadRes.body() == null) {
-            Log.e(tag, "Media upload failed: ${uploadRes.code()}")
-            return
-        }
-
-        val attachment = uploadRes.body()!!
-
-        // Encrypt the metadata / filename with E2EE
-        val encryptedMeta = CryptoEngine.encrypt(file.name, aesKey)
-        val clientMsgId = UUID.randomUUID().toString()
-        val tempId = UUID.randomUUID().toString()
-
-        val localMessage = MessageEntity(
-            id = tempId,
-            pairId = pairId,
-            senderDeviceId = myDeviceId,
-            clientMessageId = clientMsgId,
-            plaintext = "[${messageType.lowercase()}]",
-            ciphertext = encryptedMeta.ciphertext,
-            iv = encryptedMeta.iv,
-            messageType = messageType,
-            replyToMessageId = replyToMessageId,
-            attachmentLocalPath = file.absolutePath,
-            attachmentRemoteId = attachment.attachmentId,
-            attachmentFileName = file.name,
-            status = "PENDING",
-            isOutgoing = true,
-            timestamp = System.currentTimeMillis()
-        )
-        messageDao.insertOrUpdate(localMessage)
-
-        val req = SendMessageRequestDto(
-            clientMessageId = clientMsgId,
-            ciphertextPayload = encryptedMeta.ciphertext,
-            iv = encryptedMeta.iv,
-            ephemeralPublicKey = null,
-            messageType = messageType,
-            replyToMessageId = replyToMessageId,
-            mediaAttachmentId = attachment.attachmentId
-        )
-
-        val sendRes = apiService.sendMessage(req)
-        if (sendRes.isSuccessful && sendRes.body() != null) {
-            val serverMsg = sendRes.body()!!
-            messageDao.deleteById(tempId)
-            messageDao.insertOrUpdate(localMessage.copy(id = serverMsg.id, status = serverMsg.status))
-        }
-    }
-
-    private fun downloadAttachmentIfNeeded(messageId: String, attachmentRemoteId: String) {
-        scope.launch(Dispatchers.IO) {
-            try {
-                val response = apiService.downloadMedia(attachmentRemoteId)
-                if (response.isSuccessful && response.body() != null) {
-                    val mediaDir = File(context.cacheDir, "attachments").apply { mkdirs() }
-                    val localFile = File(mediaDir, "att_$attachmentRemoteId")
-                    response.body()!!.byteStream().use { input ->
-                        FileOutputStream(localFile).use { output ->
-                            input.copyTo(output)
-                        }
-                    }
-                    messageDao.updateAttachmentLocalPath(messageId, localFile.absolutePath)
-                    Log.i(tag, "Downloaded attachment $attachmentRemoteId for message $messageId -> ${localFile.absolutePath}")
-                } else {
-                    Log.w(tag, "Failed to download media attachment $attachmentRemoteId: code ${response.code()}")
+        // Auto-sync whenever WebSocket reconnects
+        scope.launch {
+            webSocketClient.connectionState.collect { state ->
+                if (state == com.twocall.chat.data.remote.ws.WsConnectionState.CONNECTED) {
+                    try { syncMessagesForAllPairs() } catch (ignored: Exception) {}
                 }
-            } catch (e: Exception) {
-                Log.w(tag, "Error downloading media attachment $attachmentRemoteId: ${e.message}")
             }
         }
     }
 
+    // ── Sync ─────────────────────────────────────────────────────────────────
+
+    /** Sync active pair messages */
     suspend fun syncMessages() {
-        val pairId = keyStoreManager.getPairId() ?: return
-        val aesKey = keyStoreManager.getSharedSessionAesKey() ?: return
-        val myDeviceId = keyStoreManager.getDeviceId() ?: return
+        val pairId = keyStoreManager.getActivePairId() ?: return
+        syncMessagesForPair(pairId)
+    }
+
+    /** Sync messages for all known pairs */
+    suspend fun syncMessagesForAllPairs(strict: Boolean = false) {
+        var failure: Exception? = null
+        for (pairId in keyStoreManager.getAllPairIds()) {
+            try { syncProfile(pairId) } catch (e: Exception) { failure = e }
+            try { syncMessagesForPair(pairId, strict) } catch (e: Exception) { failure = e }
+        }
+        if (strict) failure?.let { throw it }
+    }
+
+    suspend fun syncMessagesForPair(pairId: String, strict: Boolean = false) {
+        val aesKey = keyStoreManager.getSharedAesKey(pairId) ?: return
+        val myDeviceId = keyStoreManager.getDeviceId(pairId) ?: return
 
         try {
-            val res = apiService.syncMessages(null)
+            val res = apiService.syncMessages(null, pairId)
+            if (!res.isSuccessful) throw java.io.IOException("Message sync HTTP ${res.code()}")
             if (res.isSuccessful && res.body() != null) {
                 val list = res.body()!!
+                var latestPreview: String? = null
+                var latestTimestamp = 0L
                 for (dto in list) {
+                    if (dto.pairId != pairId) continue // skip other pairs
                     val isOutgoing = dto.senderDeviceId == myDeviceId
                     val existingMsg = messageDao.getMessageById(dto.id)
 
@@ -235,26 +187,170 @@ class ChatRepository(
                     )
                     messageDao.insertOrUpdate(entity)
 
-                    // Auto-download attachment if received media message and not saved locally yet
-                    if (!dto.mediaAttachmentId.isNullOrBlank() && existingMsg?.attachmentLocalPath == null) {
-                        downloadAttachmentIfNeeded(dto.id, dto.mediaAttachmentId)
+                    // Track latest for conversation preview
+                    val ts = parseIsoTimestamp(dto.createdAt)
+                    if (ts > latestTimestamp) {
+                        latestTimestamp = ts
+                        latestPreview = buildPreview(decryptedText, dto.messageType, isOutgoing)
                     }
 
-                    // If incoming and status is DELIVERED, send READ receipt
-                    if (!isOutgoing && dto.status != "READ") {
-                        sendReceipt(dto.id, "READ")
+                    if (!dto.mediaAttachmentId.isNullOrBlank() && existingMsg?.attachmentLocalPath == null) {
+                        downloadAttachmentIfNeeded(dto.id, dto.mediaAttachmentId, pairId)
                     }
+
+                    if (!isOutgoing && dto.status != "READ") {
+                        sendReceiptForPair(pairId, dto.id, "DELIVERED")
+                    }
+                }
+
+                // Update conversation preview
+                if (latestPreview != null && latestTimestamp > 0) {
+                    conversationDao.updateLastMessage(pairId, latestPreview, latestTimestamp)
                 }
             }
         } catch (e: Exception) {
-            Log.w(tag, "Sync messages failed: ${e.message}")
+            Log.w(tag, "Sync messages failed for pair $pairId: ${e.message}")
+            if (strict) throw e
         }
     }
 
-    suspend fun sendReceipt(messageId: String, status: String) {
+    private fun buildPreview(plaintext: String, messageType: String, isOutgoing: Boolean): String {
+        val prefix = if (isOutgoing) "You: " else ""
+        return when (messageType.uppercase()) {
+            "IMAGE" -> "${prefix}📷 Photo"
+            "VIDEO" -> "${prefix}🎥 Video"
+            "AUDIO" -> "${prefix}🎤 Voice message"
+            "DOCUMENT" -> "${prefix}📄 Document"
+            else -> "$prefix${plaintext.take(50)}"
+        }
+    }
+
+    // ── Send Messages ─────────────────────────────────────────────────────────
+
+    suspend fun sendTextMessage(text: String, replyToMessageId: String? = null) {
+        val pairId = keyStoreManager.getActivePairId() ?: return
+        val myDeviceId = keyStoreManager.getDeviceId(pairId) ?: return
+        val aesKey = keyStoreManager.getSharedAesKey(pairId) ?: run {
+            Log.e(tag, "Cannot encrypt: Shared AES key is null for pair $pairId")
+            return
+        }
+
+        val encrypted = CryptoEngine.encrypt(text, aesKey)
+        val clientMsgId = UUID.randomUUID().toString()
+        val tempId = UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
+
+        val localMessage = MessageEntity(
+            id = tempId,
+            pairId = pairId,
+            senderDeviceId = myDeviceId,
+            clientMessageId = clientMsgId,
+            plaintext = text,
+            ciphertext = encrypted.ciphertext,
+            iv = encrypted.iv,
+            messageType = "TEXT",
+            replyToMessageId = replyToMessageId,
+            status = "PENDING",
+            isOutgoing = true,
+            timestamp = now
+        )
+        messageDao.insertOrUpdate(localMessage)
+        conversationDao.updateLastMessage(pairId, "You: ${text.take(50)}", now)
+
         try {
-            apiService.updateReceipt(ReceiptUpdateRequestDto(messageId, status))
+            val req = SendMessageRequestDto(
+                clientMessageId = clientMsgId,
+                ciphertextPayload = encrypted.ciphertext,
+                iv = encrypted.iv,
+                ephemeralPublicKey = null,
+                messageType = "TEXT",
+                replyToMessageId = replyToMessageId,
+                mediaAttachmentId = null
+            )
+            val response = apiService.sendMessage(req)
+            if (response.isSuccessful && response.body() != null) {
+                val serverMsg = response.body()!!
+                messageDao.deleteById(tempId)
+                messageDao.insertOrUpdate(localMessage.copy(id = serverMsg.id, status = serverMsg.status))
+            }
+        } catch (e: Exception) {
+            Log.w(tag, "Failed to send message: ${e.message}")
+        }
+    }
+
+    suspend fun sendMediaMessage(file: File, contentType: String, messageType: String, replyToMessageId: String? = null) {
+        val pairId = keyStoreManager.getActivePairId() ?: return
+        val myDeviceId = keyStoreManager.getDeviceId(pairId) ?: return
+        val aesKey = keyStoreManager.getSharedAesKey(pairId) ?: return
+
+        val requestFile = file.asRequestBody(contentType.toMediaTypeOrNull())
+        val body = MultipartBody.Part.createFormData("file", file.name, requestFile)
+
+        val uploadRes = apiService.uploadMedia(body, null)
+        if (!uploadRes.isSuccessful || uploadRes.body() == null) {
+            Log.e(tag, "Media upload failed: ${uploadRes.code()}")
+            return
+        }
+
+        val attachment = uploadRes.body()!!
+        val encryptedMeta = CryptoEngine.encrypt(file.name, aesKey)
+        val clientMsgId = UUID.randomUUID().toString()
+        val tempId = UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
+
+        val localMessage = MessageEntity(
+            id = tempId,
+            pairId = pairId,
+            senderDeviceId = myDeviceId,
+            clientMessageId = clientMsgId,
+            plaintext = "[${messageType.lowercase()}]",
+            ciphertext = encryptedMeta.ciphertext,
+            iv = encryptedMeta.iv,
+            messageType = messageType,
+            replyToMessageId = replyToMessageId,
+            attachmentLocalPath = file.absolutePath,
+            attachmentRemoteId = attachment.attachmentId,
+            attachmentFileName = file.name,
+            status = "PENDING",
+            isOutgoing = true,
+            timestamp = now
+        )
+        messageDao.insertOrUpdate(localMessage)
+        conversationDao.updateLastMessage(pairId, buildPreview("[${messageType.lowercase()}]", messageType, true), now)
+
+        val req = SendMessageRequestDto(
+            clientMessageId = clientMsgId,
+            ciphertextPayload = encryptedMeta.ciphertext,
+            iv = encryptedMeta.iv,
+            ephemeralPublicKey = null,
+            messageType = messageType,
+            replyToMessageId = replyToMessageId,
+            mediaAttachmentId = attachment.attachmentId
+        )
+
+        val sendRes = apiService.sendMessage(req)
+        if (sendRes.isSuccessful && sendRes.body() != null) {
+            val serverMsg = sendRes.body()!!
+            messageDao.deleteById(tempId)
+            messageDao.insertOrUpdate(localMessage.copy(id = serverMsg.id, status = serverMsg.status))
+        }
+    }
+
+    // ── Receipt / Reaction / Delete ─────────────────────────────────────────
+
+    suspend fun sendReceipt(messageId: String, status: String) {
+        val pairId = keyStoreManager.getActivePairId() ?: return
+        sendReceiptForPair(pairId, messageId, status)
+    }
+
+    suspend fun sendReceiptForPair(pairId: String, messageId: String, status: String) {
+        try {
+            val response = apiService.updateReceipt(ReceiptUpdateRequestDto(messageId, status), pairId)
+            if (!response.isSuccessful) return
             messageDao.updateStatus(messageId, status)
+            if (status == "READ") {
+                conversationDao.clearUnread(pairId)
+            }
         } catch (e: Exception) {
             Log.w(tag, "Update receipt failed: ${e.message}")
         }
@@ -270,18 +366,12 @@ class ChatRepository(
     }
 
     suspend fun deleteMessage(messageId: String) {
-        // Mark deleted locally immediately for smooth UI feedback
         messageDao.markDeleted(messageId)
-
-        // Resolve target server ID if messageId is local tempId or clientMessageId
         val msg = messageDao.getMessageById(messageId)
         val targetServerId = msg?.id ?: messageId
-
         try {
             val response = apiService.deleteMessage(targetServerId)
-            if (response.isSuccessful) {
-                Log.i(tag, "Successfully deleted message $targetServerId on server")
-            } else {
+            if (!response.isSuccessful) {
                 Log.w(tag, "Delete message server responded with code ${response.code()}")
             }
         } catch (e: Exception) {
@@ -293,13 +383,55 @@ class ChatRepository(
         webSocketClient.sendEvent(if (isTyping) "TYPING_START" else "TYPING_STOP", mapOf("typing" to isTyping))
     }
 
-    private suspend fun handleIncomingWsEvent(event: WsEventDto<Any>) {
-        val pairId = keyStoreManager.getPairId() ?: return
-        val aesKey = keyStoreManager.getSharedSessionAesKey()
+    // ── Call Log ─────────────────────────────────────────────────────────────
 
-        // Any event from partner implies partner is currently online
+    suspend fun saveCallLog(callLog: CallLogEntity) {
+        try {
+            callLogDao.insertOrUpdate(callLog)
+        } catch (e: Exception) {
+            Log.w(tag, "Failed to save call log: ${e.message}")
+        }
+    }
+
+    suspend fun updateLastMessagePreview(pairId: String, preview: String, timestamp: Long) {
+        try {
+            conversationDao.updateLastMessage(pairId, preview, timestamp)
+        } catch (e: Exception) {
+            Log.w(tag, "Failed to update last message preview: ${e.message}")
+        }
+    }
+
+    // ── Media Download ───────────────────────────────────────────────────────
+
+    private fun downloadAttachmentIfNeeded(messageId: String, attachmentRemoteId: String, pairId: String? = null) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                val response = apiService.downloadMedia(attachmentRemoteId, pairId)
+                if (response.isSuccessful && response.body() != null) {
+                    val mediaDir = File(context.cacheDir, "attachments").apply { mkdirs() }
+                    val localFile = File(mediaDir, "att_$attachmentRemoteId")
+                    response.body()!!.byteStream().use { input ->
+                        FileOutputStream(localFile).use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    messageDao.updateAttachmentLocalPath(messageId, localFile.absolutePath)
+                }
+            } catch (e: Exception) {
+                Log.w(tag, "Error downloading attachment $attachmentRemoteId: ${e.message}")
+            }
+        }
+    }
+
+    // ── WebSocket Event Handler ───────────────────────────────────────────────
+
+    private suspend fun handleIncomingWsEvent(event: WsEventDto<Any>) {
+        val eventPairId = event.pairId
+        val aesKey = keyStoreManager.getSharedAesKey(eventPairId)
+
+        // Any event from partner implies partner is currently online for that pair
         if (event.eventType != "PRESENCE") {
-            conversationDao.updatePresence(pairId, true, System.currentTimeMillis())
+            conversationDao.updatePresence(eventPairId, true, System.currentTimeMillis())
         }
 
         when (event.eventType) {
@@ -317,7 +449,7 @@ class ChatRepository(
 
                 val entity = MessageEntity(
                     id = msgDto.id,
-                    pairId = pairId,
+                    pairId = eventPairId,
                     senderDeviceId = msgDto.senderDeviceId,
                     clientMessageId = msgDto.clientMessageId,
                     plaintext = decrypted,
@@ -332,18 +464,24 @@ class ChatRepository(
                 )
                 messageDao.insertOrUpdate(entity)
 
-                // Auto download media attachment if received
+                // Update conversation preview and unread for this pair
+                val preview = buildPreview(decrypted, msgDto.messageType, false)
+                conversationDao.updateLastMessage(eventPairId, preview, parseIsoTimestamp(msgDto.createdAt))
+
+                // Increment unread only if this is NOT the currently active pair
+                if (eventPairId != keyStoreManager.getActivePairId()) {
+                    conversationDao.incrementUnread(eventPairId)
+                }
+
                 if (!msgDto.mediaAttachmentId.isNullOrBlank()) {
                     downloadAttachmentIfNeeded(msgDto.id, msgDto.mediaAttachmentId)
                 }
 
-                // Check for love emoji in incoming message
                 if (com.twocall.chat.ui.components.containsLoveEmoji(decrypted)) {
                     _loveAnimationEvents.tryEmit(Unit)
                 }
 
-                // Send DELIVERED receipt
-                sendReceipt(msgDto.id, "DELIVERED")
+                sendReceiptForPair(eventPairId, msgDto.id, "DELIVERED")
             }
 
             "MESSAGE_DELIVERED" -> {
@@ -378,28 +516,33 @@ class ChatRepository(
                 messageDao.markDeleted(msgId)
             }
 
-            "TYPING_START" -> conversationDao.updateTyping(pairId, true)
-            "TYPING_STOP" -> conversationDao.updateTyping(pairId, false)
+            "TYPING_START" -> conversationDao.updateTyping(eventPairId, true)
+            "TYPING_STOP" -> conversationDao.updateTyping(eventPairId, false)
 
             "PRESENCE" -> {
                 val payloadJson = gson.toJson(event.payload)
                 val data = gson.fromJson(payloadJson, Map::class.java)
                 val eventName = data["event"] as? String
 
+                if (eventName == "PROFILE_UPDATED") {
+                    syncProfile(eventPairId)
+                    return
+                }
+
                 if (eventName == "PAIR_DELETED" || eventName == "PARTNER_DISCONNECTED") {
-                    Log.i(tag, "Pair terminated by partner: $eventName")
+                    Log.i(tag, "Pair terminated by partner: $eventName for pairId=$eventPairId")
                     onPairTerminated?.invoke()
                     return
                 }
 
                 val online = data["online"] as? Boolean ?: false
-                conversationDao.updatePresence(pairId, online, System.currentTimeMillis())
+                conversationDao.updatePresence(eventPairId, online, System.currentTimeMillis())
 
                 if (eventName == "PAIRING_COMPLETE") {
                     val partnerDevId = data["partnerDeviceId"] as? String
                     val partnerKey = data["partnerPublicKey"] as? String
                     if (partnerDevId != null && partnerKey != null) {
-                        keyStoreManager.savePartnerInfo(partnerDevId, partnerKey)
+                        keyStoreManager.savePartnerInfo(eventPairId, partnerDevId, partnerKey)
                     }
                 }
             }

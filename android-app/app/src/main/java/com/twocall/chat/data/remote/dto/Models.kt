@@ -1,5 +1,11 @@
 package com.twocall.chat.data.remote.dto
 
+data class ProfileDto(val name: String = "Partner", val imageBase64: String? = null)
+data class ProfilesDto(val mine: ProfileDto, val partner: ProfileDto)
+data class IncomingCallDto(val callId: String, val pairId: String, val callerDeviceId: String,
+    val callType: String, val sdp: String, val iceCandidates: List<RecoveredIceDto> = emptyList())
+data class RecoveredIceDto(val candidate: String, val sdpMid: String, val sdpMLineIndex: Int)
+
 data class CreatePairRequestDto(
     val deviceFingerprint: String,
     val publicIdentityKey: String,

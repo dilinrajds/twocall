@@ -146,7 +146,9 @@ public class DeviceAuthService {
             wsSessionManager.closeDeviceSession(d.getId());
         }
 
-        pairRepository.deleteById(pairId);
+        Pair pair = pairRepository.findById(pairId)
+                .orElseThrow(() -> new ResourceNotFoundException("Pair not found: " + pairId));
+        pairRepository.delete(pair);
         log.info("Device {} disconnected. Pair {} deleted and partner notified.", deviceId, pairId);
     }
 

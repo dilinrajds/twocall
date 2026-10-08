@@ -27,4 +27,18 @@ public class WebRtcController {
         TurnCredentialsResponse response = signalingService.getTurnCredentials(principal.getDeviceId());
         return ResponseEntity.ok(response);
     }
+
+    @GetMapping("/calls/{callId}/incoming")
+    public java.util.Map<String, Object> incoming(@org.springframework.web.bind.annotation.PathVariable java.util.UUID callId) {
+        DevicePrincipal principal = accessValidator.getAuthenticatedPrincipal();
+        return signalingService.recoverIncomingCall(principal.getPairId(), principal.getDeviceId(), callId);
+    }
+
+    @org.springframework.web.bind.annotation.PostMapping("/calls/{callId}/reject")
+    public java.util.Map<String, String> reject(@org.springframework.web.bind.annotation.PathVariable java.util.UUID callId) {
+        DevicePrincipal principal = accessValidator.getAuthenticatedPrincipal();
+        signalingService.recoverIncomingCall(principal.getPairId(), principal.getDeviceId(), callId);
+        signalingService.endCall(principal.getPairId(), principal.getDeviceId(), callId, "REJECTED");
+        return java.util.Map.of("message", "Call rejected");
+    }
 }

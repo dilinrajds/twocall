@@ -27,7 +27,10 @@ fun NavGraph(
 
     // Global Incoming/Outgoing Call Navigation Observer
     LaunchedEffect(callState, currentSession) {
-        if (callState == CallState.INCOMING_RINGING || callState == CallState.OUTGOING_RINGING) {
+        if (callState == CallState.INCOMING_RINGING || callState == CallState.OUTGOING_CALLING) {
+            currentSession?.pairId?.let { pairId ->
+                if (chatViewModel.activePairId.value != pairId) chatViewModel.selectConversation(pairId)
+            }
             val isVideo = currentSession?.isVideo == true
             val targetRoute = if (isVideo) Screen.VideoCall.route else Screen.AudioCall.route
             if (navController.currentDestination?.route != targetRoute) {
@@ -39,8 +42,14 @@ fun NavGraph(
     LaunchedEffect(Unit) {
         app.pairTerminatedFlow.collect {
             pairingViewModel.reset()
-            navController.navigate(Screen.PairingWelcome.route) {
-                popUpTo(0) { inclusive = true }
+            if (app.keyStoreManager.isPaired()) {
+                navController.navigate(Screen.Home.route) {
+                    popUpTo(0) { inclusive = true }
+                }
+            } else {
+                navController.navigate(Screen.PairingWelcome.route) {
+                    popUpTo(0) { inclusive = true }
+                }
             }
         }
     }
@@ -59,9 +68,25 @@ fun NavGraph(
                 },
                 onNavigateToConversation = {
                     app.connectWebSocket()
-                    navController.navigate(Screen.Conversation.route) {
+                    if (navController.currentDestination?.route == Screen.Splash.route) navController.navigate(Screen.Home.route) {
                         popUpTo(Screen.Splash.route) { inclusive = true }
                     }
+                }
+            )
+        }
+
+        composable(Screen.Home.route) {
+            HomeScreen(
+                viewModel = chatViewModel,
+                onOpenConversation = { pairId ->
+                    navController.navigate(Screen.Conversation.route)
+                },
+                onAddPersonClick = {
+                    pairingViewModel.reset()
+                    navController.navigate(Screen.PairingWelcome.route)
+                },
+                onSettingsClick = {
+                    navController.navigate(Screen.Settings.route)
                 }
             )
         }
@@ -85,7 +110,7 @@ fun NavGraph(
                 onBackClick = { navController.popBackStack() },
                 onPairedSuccess = {
                     app.connectWebSocket()
-                    navController.navigate(Screen.Conversation.route) {
+                    navController.navigate(Screen.Home.route) {
                         popUpTo(Screen.PairingWelcome.route) { inclusive = true }
                     }
                 }
@@ -98,7 +123,7 @@ fun NavGraph(
                 onBackClick = { navController.popBackStack() },
                 onPairedSuccess = {
                     app.connectWebSocket()
-                    navController.navigate(Screen.Conversation.route) {
+                    navController.navigate(Screen.Home.route) {
                         popUpTo(Screen.PairingWelcome.route) { inclusive = true }
                     }
                 }
@@ -109,7 +134,7 @@ fun NavGraph(
             PairingSuccessScreen(
                 onOpenConversation = {
                     app.connectWebSocket()
-                    navController.navigate(Screen.Conversation.route) {
+                    navController.navigate(Screen.Home.route) {
                         popUpTo(Screen.PairingWelcome.route) { inclusive = true }
                     }
                 }
@@ -119,6 +144,14 @@ fun NavGraph(
         composable(Screen.Conversation.route) {
             ConversationScreen(
                 viewModel = chatViewModel,
+                onBackClick = {
+                    val popped = navController.popBackStack(Screen.Home.route, false)
+                    if (!popped) {
+                        navController.navigate(Screen.Home.route) {
+                            popUpTo(0) { inclusive = true }
+                        }
+                    }
+                },
                 onAudioCallClick = {
                     callViewModel.startAudioCall()
                     navController.navigate(Screen.AudioCall.route)
@@ -137,8 +170,11 @@ fun NavGraph(
             AudioCallScreen(
                 viewModel = callViewModel,
                 onCallEnded = {
-                    if (navController.currentDestination?.route == Screen.AudioCall.route) {
-                        navController.popBackStack(Screen.Conversation.route, false)
+                    val popped = navController.popBackStack(Screen.Conversation.route, false)
+                    if (!popped) {
+                        navController.navigate(Screen.Conversation.route) {
+                            popUpTo(0) { inclusive = true }
+                        }
                     }
                 }
             )
@@ -148,8 +184,11 @@ fun NavGraph(
             VideoCallScreen(
                 viewModel = callViewModel,
                 onCallEnded = {
-                    if (navController.currentDestination?.route == Screen.VideoCall.route) {
-                        navController.popBackStack(Screen.Conversation.route, false)
+                    val popped = navController.popBackStack(Screen.Conversation.route, false)
+                    if (!popped) {
+                        navController.navigate(Screen.Conversation.route) {
+                            popUpTo(0) { inclusive = true }
+                        }
                     }
                 }
             )
@@ -162,8 +201,14 @@ fun NavGraph(
                 onBackClick = { navController.popBackStack() },
                 onDisconnected = {
                     pairingViewModel.reset()
-                    navController.navigate(Screen.PairingWelcome.route) {
-                        popUpTo(0) { inclusive = true }
+                    if (app.keyStoreManager.isPaired()) {
+                        navController.navigate(Screen.Home.route) {
+                            popUpTo(0) { inclusive = true }
+                        }
+                    } else {
+                        navController.navigate(Screen.PairingWelcome.route) {
+                            popUpTo(0) { inclusive = true }
+                        }
                     }
                 }
             )

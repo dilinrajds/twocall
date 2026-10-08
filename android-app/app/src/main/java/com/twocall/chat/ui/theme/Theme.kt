@@ -38,7 +38,7 @@ private val LightColorScheme = lightColorScheme(
 )
 
 @Composable
-fun TwoCallTheme(
+fun ZippyCallTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit
 ) {
@@ -58,4 +58,12 @@ fun TwoCallTheme(
         typography = Typography,
         content = content
     )
+}
+
+@Composable
+fun TwoCallTheme(
+    darkTheme: Boolean = isSystemInDarkTheme(),
+    content: @Composable () -> Unit
+) {
+    ZippyCallTheme(darkTheme = darkTheme, content = content)
 }
